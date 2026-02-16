@@ -1,0 +1,35 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  github-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build optimized binary
+        run: cargo build --release
+
+      - name: Package binary
+        run: |
+          mkdir -p release-artifacts
+          cp target/release/nq release-artifacts/nq
+          sha256sum release-artifacts/nq > release-artifacts/nq.sha256
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-artifacts/nq
+            release-artifacts/nq.sha256
