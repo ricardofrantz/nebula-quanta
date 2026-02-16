@@ -19,4 +19,16 @@ pub struct Args {
     pub mode: String,
     #[arg(long)]
     pub validate: bool,
+    #[arg(long)]
+    pub record: bool,
+    #[arg(long, default_value = "frames")]
+    pub frames_dir: String,
+    #[arg(long, default_value_t = 1920)]
+    pub width: u32,
+    #[arg(long, default_value_t = 1080)]
+    pub height: u32,
+    #[arg(long, default_value_t = 60)]
+    pub fps: u32,
+    #[arg(long, default_value_t = 1)]
+    pub every_steps: usize,
 }

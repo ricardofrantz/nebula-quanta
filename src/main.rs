@@ -5,11 +5,14 @@ mod direct;
 mod particle;
 mod sim;
 mod stats;
+mod frame;
 mod tree;
 
 use config::Args;
+use frame::FrameRecorder;
 use direct::run_direct;
 use particle::ParticleSoa;
+use std::path::PathBuf;
 
 fn main() {
     let args = Args::parse();
@@ -25,15 +28,25 @@ fn main() {
     } else {
         None
     };
+    let mut recorder = match make_recorder(&args) {
+        Ok(Some(recorder)) => Some(recorder),
+        Ok(None) => None,
+        Err(err) => {
+            eprintln!("recording disabled: {err}");
+            None
+        }
+    };
 
     let mode_hint = args.mode.to_lowercase();
 
     let result = match mode_hint.as_str() {
         "barnes_hut" | "barneshut" | "bh" => {
-            sim::run_barnes_hut(&mut particles, &args).map(|stats| ("barnes_hut".to_string(), stats))
+            sim::run_barnes_hut(&mut particles, &args, recorder.as_mut())
+                .map(|stats| ("barnes_hut".to_string(), stats))
         }
         "direct" => {
-            run_direct(&mut particles, &args).map(|stats| ("direct".to_string(), stats))
+            run_direct(&mut particles, &args, recorder.as_mut())
+                .map(|stats| ("direct".to_string(), stats))
         }
         other => {
             eprintln!("unknown mode: {}. use --mode=barnes_hut or --mode=direct", other);
@@ -71,6 +84,19 @@ fn main() {
                     println!("validate=skipped mode=direct");
                 }
             }
+
+            if let Some(recorder) = recorder.as_ref() {
+                if recorder.frame_count() > 0 {
+                    let output_name = PathBuf::from(format!("nebula-quanta-{}.mp4", mode_name))
+                        .to_string_lossy()
+                        .into_owned();
+                    println!(
+                        "record_frames={} render_cmd=\"{}\"",
+                        recorder.frame_count(),
+                        recorder.render_command(&output_name, args.fps),
+                    );
+                }
+            }
         }
         Err(err) => {
             eprintln!("simulation failed: {}", err);
@@ -106,7 +132,7 @@ fn should_validate(args: &Args) -> bool {
 }
 
 fn validate_against_direct(args: &Args, fast: &ParticleSoa, mut ref_particles: ParticleSoa) {
-    if run_direct(&mut ref_particles, args).is_err() {
+    if run_direct(&mut ref_particles, args, None).is_err() {
         eprintln!("validation failed: unable to run reference direct mode");
         return;
     }
@@ -121,6 +147,18 @@ fn validate_against_direct(args: &Args, fast: &ParticleSoa, mut ref_particles: P
         max_pos,
         max_vel,
     );
+}
+
+fn make_recorder(args: &Args) -> Result<Option<FrameRecorder>, String> {
+    if !args.record {
+        return Ok(None);
+    }
+
+    if args.fps == 0 {
+        return Err("fps must be greater than zero for recording".to_string());
+    }
+
+    FrameRecorder::new(args).map(Some)
 }
 
 fn compare_states(a: &ParticleSoa, b: &ParticleSoa) -> (f64, f64, f64, f64) {

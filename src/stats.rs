@@ -44,27 +44,4 @@ impl RunStats {
         self.workspace_bytes() as f64 / self.particle_count as f64
     }
 
-    pub const fn from_parts(
-        build_ms: f64,
-        force_ms: f64,
-        integrate_ms: f64,
-        peak_node_count: usize,
-        node_capacity: usize,
-        particle_count: usize,
-        particle_bytes: usize,
-        node_pool_bytes: usize,
-        traversal_stack_bytes: usize,
-    ) -> Self {
-        Self {
-            build_ms,
-            force_ms,
-            integrate_ms,
-            peak_node_count,
-            node_capacity,
-            particle_count,
-            particle_bytes,
-            node_pool_bytes,
-            traversal_stack_bytes,
-        }
-    }
 }

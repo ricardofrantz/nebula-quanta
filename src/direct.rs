@@ -1,12 +1,16 @@
 use std::time::Instant;
 use std::mem::size_of;
 
-use crate::{config::Args, particle::ParticleSoa, stats::RunStats};
+use crate::{config::Args, frame::FrameRecorder, particle::ParticleSoa, stats::RunStats};
 
 const G: f64 = 1.0;
 const F64_BYTES: usize = size_of::<f64>();
 
-pub fn run_direct(particles: &mut ParticleSoa, args: &Args) -> Result<RunStats, String> {
+pub fn run_direct(
+    particles: &mut ParticleSoa,
+    args: &Args,
+    recorder: Option<&mut FrameRecorder>,
+) -> Result<RunStats, String> {
     if particles.len() == 0 {
         return Ok(RunStats::zero());
     }
@@ -14,6 +18,7 @@ pub fn run_direct(particles: &mut ParticleSoa, args: &Args) -> Result<RunStats, 
     let n = particles.len();
     let mut ax = vec![0.0; n];
     let mut ay = vec![0.0; n];
+    let mut recorder = recorder;
 
     let mut build_elapsed = 0.0;
     let mut force_elapsed = 0.0;
@@ -22,6 +27,9 @@ pub fn run_direct(particles: &mut ParticleSoa, args: &Args) -> Result<RunStats, 
     let mut t = Instant::now();
     compute_direct_accel(particles, args.epsilon, &mut ax, &mut ay);
     build_elapsed += t.elapsed().as_secs_f64() * 1000.0;
+    if let Some(recorder) = recorder.as_deref_mut() {
+        recorder.record_step(0, particles, particle_bounds(particles)?)?;
+    }
 
     let mut step = 0;
     while step < args.steps {
@@ -33,6 +41,9 @@ pub fn run_direct(particles: &mut ParticleSoa, args: &Args) -> Result<RunStats, 
             particles.y[i] += particles.vy[i] * args.dt;
         }
         integrate_elapsed += t.elapsed().as_secs_f64() * 1000.0;
+        if let Some(recorder) = recorder.as_deref_mut() {
+            recorder.record_step(step + 1, particles, particle_bounds(particles)?)?;
+        }
 
         t = Instant::now();
         compute_direct_accel(particles, args.epsilon, &mut ax, &mut ay);
@@ -94,4 +105,36 @@ pub fn compute_direct_accel(particles: &ParticleSoa, epsilon: f64, ax: &mut [f64
 
 fn particle_state_bytes(n: usize) -> usize {
     n.saturating_mul(5).saturating_mul(F64_BYTES)
+}
+
+fn particle_bounds(particles: &ParticleSoa) -> Result<(f64, f64, f64, f64), String> {
+    let n = particles.len();
+    if n == 0 {
+        return Err("no particles available for frame bounds".to_string());
+    }
+
+    let mut x_min = particles.x[0];
+    let mut x_max = particles.x[0];
+    let mut y_min = particles.y[0];
+    let mut y_max = particles.y[0];
+
+    for i in 1..n {
+        let x = particles.x[i];
+        let y = particles.y[i];
+        if x < x_min {
+            x_min = x;
+        }
+        if x > x_max {
+            x_max = x;
+        }
+        if y < y_min {
+            y_min = y;
+        }
+        if y > y_max {
+            y_max = y;
+        }
+    }
+
+    let pad_x = ((x_max - x_min).abs() + (y_max - y_min).abs()) * 1e-12 + 1.0e-6;
+    Ok((x_min - pad_x, x_max + pad_x, y_min - pad_x, y_max + pad_x))
 }

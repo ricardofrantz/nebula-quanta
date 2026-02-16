@@ -4,6 +4,7 @@ use std::time::Instant;
 use crate::{
     config::Args,
     direct::run_direct as run_direct_reference,
+    frame::FrameRecorder,
     particle::ParticleSoa,
     stats::RunStats,
     tree::{Node, QuadTree},
@@ -11,13 +12,17 @@ use crate::{
 
 const G: f64 = 1.0;
 
-pub fn run_barnes_hut(particles: &mut ParticleSoa, args: &Args) -> Result<RunStats, String> {
+pub fn run_barnes_hut(
+    particles: &mut ParticleSoa,
+    args: &Args,
+    recorder: Option<&mut FrameRecorder>,
+) -> Result<RunStats, String> {
     if particles.len() == 0 {
         return Ok(RunStats::zero());
     }
 
     if args.theta <= 0.0 {
-        return run_direct_reference(particles, args);
+        return run_direct_reference(particles, args, None);
     }
 
     let n = particles.len();
@@ -33,6 +38,7 @@ pub fn run_barnes_hut(particles: &mut ParticleSoa, args: &Args) -> Result<RunSta
     let mut ax = vec![0.0; n];
     let mut ay = vec![0.0; n];
     let mut traversal = Vec::with_capacity(node_capacity);
+    let mut recorder = recorder;
 
     let mut build_elapsed = 0.0;
     let mut force_elapsed = 0.0;
@@ -43,6 +49,11 @@ pub fn run_barnes_hut(particles: &mut ParticleSoa, args: &Args) -> Result<RunSta
     build_tree(&mut tree, particles)?;
     peak_node_count = peak_node_count.max(tree.nodes.len());
     build_elapsed += step_start.elapsed().as_secs_f64() * 1000.0;
+    if let Some(recorder) = recorder.as_deref_mut() {
+        if let Some(bounds) = tree.root_bounds() {
+            recorder.record_step(0, particles, bounds)?;
+        }
+    }
 
     step_start = Instant::now();
     compute_accel_barnes_hut(
@@ -71,6 +82,11 @@ pub fn run_barnes_hut(particles: &mut ParticleSoa, args: &Args) -> Result<RunSta
         build_tree(&mut tree, particles)?;
         peak_node_count = peak_node_count.max(tree.nodes.len());
         build_elapsed += t.elapsed().as_secs_f64() * 1000.0;
+        if let Some(recorder) = recorder.as_deref_mut() {
+            if let Some(bounds) = tree.root_bounds() {
+                recorder.record_step(step + 1, particles, bounds)?;
+            }
+        }
 
         t = Instant::now();
         compute_accel_barnes_hut(

@@ -65,4 +65,8 @@ impl QuadTree {
         self.nodes.push(Node::with_bounds(x_min, x_max, y_min, y_max));
     }
 
+    pub fn root_bounds(&self) -> Option<(f64, f64, f64, f64)> {
+        let node = self.nodes.first()?;
+        Some((node.x_min, node.x_max, node.y_min, node.y_max))
+    }
 }
