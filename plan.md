@@ -1,7 +1,21 @@
 # Barnes–Hut Simulation Implementation Plan
 
 ## Goal
-Implement a simpler, faster Barnes–Hut simulation with a clear trade-off knob for speed vs accuracy (`θ`) and a small, maintainable code surface.
+Implement a max-performance, memory-frugal Barnes–Hut engine with a clear speed-vs-accuracy knob (`θ`) while keeping the codebase small and understandable.
+
+## Performance and memory doctrine (big-run target)
+- Priority 1 is throughput and memory bound correctness:
+  - Keep the hot loop branch-light and cache-friendly.
+  - Keep simulation memory strictly \(O(N)\) with a small fixed factor.
+  - Delay all expensive allocations and object creation until startup.
+- Target shape:
+  - particles: pure SoA, contiguous buffers
+  - nodes: fixed-width packed struct array
+  - traversal: explicit stack/queue arrays, no recursive allocation
+- Big-run guardrails:
+  - Node index type is compact (`u32`/`i32`), not pointers.
+  - No per-step `Vec` growth; all containers are cleared and reused.
+  - No cloning of full per-particle vectors per timestep.
 
 ## Assumptions to keep and verify (no hidden defaults)
 - Performance baseline: target Barnes–Hut behavior as \(O(n \log n)\) vs direct \(O(n^2)\) for large N, then measure crossover point locally.
@@ -14,6 +28,8 @@ Implement a simpler, faster Barnes–Hut simulation with a clear trade-off knob 
   - use the 2D/3D module structure (`barnes_hut_2d`, `barnes_hut_3d`) as a reusable API pattern only.
   - the force-closure pattern expects non-normalized distance vectors from tree traversal.
 - Runtime model: keep `Bun` as orchestrator only; numeric loops must stay in Rust.
+- Memory model: fixed memory pools with explicit capacity planning for worst expected `N`.
+- Numeric model: default to `f64` if accuracy is critical, allow optional `f32` mode for throughput experiments.
 
 ## Reference source for core algorithm/math
 - Canonical paper: *A hierarchical O(N log N) force-calculation algorithm* (Barnes & Hut, 1986), DOI `10.1038/324446a0`.
@@ -43,6 +59,10 @@ Implement a simpler, faster Barnes–Hut simulation with a clear trade-off knob 
   - `x[] y[] vx[] vy[] m[]`
 - Main loop per step:
   - `build_tree` → `compute_node_mass_com` → `accumulate_forces` → `integrate`
+- Memory-aware variant:
+  - `Node` and particle buffers are `Vec<T>` with `capacity` pre-reserved to worst-case frame needs.
+  - traversal stack is one reusable `Vec<usize>` that is reset, not recreated.
+  - no `String` in hot path; IDs/labels only outside benchmark loops.
 
 ## Milestone 0 — Scope and baseline contract (0.5 day)
 - Decide dimensionality (start with 2D).
@@ -50,6 +70,9 @@ Implement a simpler, faster Barnes–Hut simulation with a clear trade-off knob 
   - \(F = G m_i m_j / (r^2 + \epsilon^2)\)
   - Optional support for 3D can be deferred.
 - Choose integration method (default: leapfrog/velocity Verlet).
+- Add big-run budgets and capacity policy:
+  - memory budget for particles and nodes in README/spec.
+  - choose fallback behavior if node budget would be exceeded.
 - Define runtime parameters:
   - `θ` (opening angle), `softening ε`, `dt`, optional max depth / rebuild policy.
 - Define acceptance checks:
@@ -59,11 +82,18 @@ Implement a simpler, faster Barnes–Hut simulation with a clear trade-off knob 
 
 ## Milestone 1 — Baseline and validation harness (0.5–1 day)
 - Implement or retain an O(n²) direct-force path behind a flag.
+- Split benchmarks into two classes:
+  - **Fast path benchmarks:** large-N, Barnes–Hut only.
+  - **Validation benchmarks:** moderate N with direct baseline.
 - Add deterministic seed and benchmark seeds.
 - Add diagnostics:
   - max/mean force error against direct method,
   - total energy drift,
   - step time split (`build`, `force`, `integrate`).
+- Add memory diagnostics:
+  - peak RSS approximation or process memory delta by phase,
+  - node pool utilization percentage,
+  - bytes per particle estimate.
 - Freeze one or two canonical scenarios for regression.
 
 ## Milestone 2 — Simple Barnes–Hut data model (1 day)
@@ -74,6 +104,12 @@ Implement a simpler, faster Barnes–Hut simulation with a clear trade-off knob 
   - aggregate mass and COM,
   - leaf body index or empty flag.
 - Add frame-local memory reuse for traversal stacks and temporary arrays.
+- Force one representation for all steps:
+  - `x`, `y`, `vx`, `vy`, `m` as aligned contiguous slices.
+  - nodes as one packed struct with fixed-order fields.
+- Add upper-bound sizing:
+  - start with `4 * N + 1` node slots for worst practical tree growth.
+  - no dynamic per-insertion allocation inside loop.
 
 ## Milestone 3 — Tree construction and force traversal (1–2 days)
 - Per step:
@@ -85,14 +121,29 @@ Implement a simpler, faster Barnes–Hut simulation with a clear trade-off knob 
   - if node satisfies `s/d < θ`, use aggregated node force,
   - else recurse children.
 - Include softening in denominator and minimum-distance guard.
+- Add explicit traversal stack with scratch buffers:
+  - pop/push child nodes in a fixed array of indices.
+  - never allocate per particle.
+- Separate force pass into two stages to reduce cache misses:
+  - read-only tree walk,
+  - single write-back to `ax[]`, `ay[]`.
+- Add optional Barnes–Hut early-exit fast path:
+  - skip empty nodes quickly with sentinel checks.
 
 ## Milestone 4 — Performance pass (1 day)
 - Remove avoidable allocations (preallocate once, clear/reuse).
-- Replace deep recursion in hot loops with iterative stack where easy.
+- Replace recursion in all hot loops with iterative stack-based traversal.
 - Co-locate frequently accessed arrays for cache friendliness.
+- Add branch pruning and branch-order optimization:
+  - compute `s/d` and distance once per node revisit.
+  - cheap reject checks before expensive force math.
+- Reduce memory traffic:
+  - one force accumulator arrays `ax`, `ay` reused and zeroed with `fill`.
+  - avoid temporary pairwise vectors for inner loops.
 - Tune by measurement:
   - run short sweeps on candidate `θ` values (for example `0.3, 0.5, 0.7, 1.0`),
   - choose the smallest `θ` meeting speed/accuracy targets.
+- Introduce optional parallelism in force accumulation (`rayon`) only after single-thread tuning is complete.
 
 ## Milestone 5 — Verification and tuning (0.5–1 day)
 - Run convergence checks over fixed datasets:
@@ -106,9 +157,12 @@ Implement a simpler, faster Barnes–Hut simulation with a clear trade-off knob 
 - Thread-level parallel force evaluation.
 - Optional adaptive `θ` by local density.
 - Optional higher-order integrator option.
+- SoA-only fixed-size SIMD-friendly layout.
+- Persistent paging for huge runs (`N` in the high six/low seven digits) with chunked output if memory cap is exceeded.
 
 ## Deliverable checklist
 - [ ] Reproducible CLI or script to run deterministic benchmark set.
 - [ ] Barnes–Hut path is default for large N.
 - [ ] O(n²) baseline retained for debug/verification.
-- [ ] Metrics logged each run (`N`, step ms, error, energy drift).
+- [ ] Metrics logged each run (`N`, step ms, memory bytes, error, energy drift).
+- [ ] Memory pool usage stays bounded and does not grow after first allocation.

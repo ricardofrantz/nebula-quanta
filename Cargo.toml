@@ -1,0 +1,20 @@
+[package]
+name = "nebula-quanta"
+version = "0.1.0"
+edition = "2021"
+description = "High-performance Barnes-Hut N-body simulation engine"
+license = "MIT"
+repository = "https://github.com/ricardofrantz/nebula-quanta"
+homepage = "https://github.com/ricardofrantz/nebula-quanta"
+readme = "README.md"
+keywords = ["simulation", "n-body", "barnes-hut", "astrophysics", "rust"]
+categories = ["science", "command-line-utilities"]
+
+[dependencies]
+clap = { version = "4.5.20", features = ["derive"] }
+rand = "0.9.0"
+rand_chacha = "0.9.0"
+
+[[bin]]
+name = "nq"
+path = "src/main.rs"

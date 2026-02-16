@@ -2,16 +2,25 @@
 
 ## 1) Purpose
 
-Build a simple, fast Barnes–Hut simulation engine centered on 2D gravity with a small, predictable code surface and a Bun-based orchestration layer.
+Implement a high-performance, memory-efficient Barnes–Hut simulation engine centered on 2D gravity with a small code surface and a Bun orchestration layer.
 
-## 2) Goals
+## 2) Scale target
 
-- Provide Barnes–Hut performance improvements over direct gravity force calculation.
-- Keep algorithm behavior transparent and easy to reason about.
-- Make correctness measurable by always retaining a direct-force verification path.
-- Record deterministic benchmark runs for speed/accuracy tradeoffs.
+- Primary objective: make `N` scale large enough that direct-force methods are no longer practical.
+- Secondary objective: keep memory growth bounded and predictable after initialization.
+- Hard constraints:
+  - all core buffers preallocated once;
+  - no unbounded growth in hot loops;
+  - explicit failure when resource bounds are exceeded.
 
-## 3) Definitions
+## 3) Goals
+
+- Deliver Barnes–Hut speedups with measured speed/accuracy knobs.
+- Keep behavior deterministic and auditable with a reference direct mode.
+- Keep memory traffic low through SoA layout and fixed-size, packed node storage.
+- Make per-run metrics first-class: time, structural memory occupancy, and optional validation deltas.
+
+## 4) Definitions
 
 - `N`: number of particles
 - `θ` (theta): Barnes–Hut opening angle threshold
@@ -19,98 +28,118 @@ Build a simple, fast Barnes–Hut simulation engine centered on 2D gravity with 
 - `dt`: time step
 - SoA: Structure of Arrays
 - COM: center of mass
+- bytes_per_particle: memory used per particle at a fixed step
+- node pool: preallocated contiguous array of quadtree nodes
 
-## 4) In-scope / out-of-scope
+## 5) In-scope / out-of-scope
 
 ### In-scope
 
-- 2D implementation with a quadtree.
-- Barnes–Hut force path with node acceptance `s/d < θ`.
-- Direct `O(N^2)` mode for validation and testing.
-- CLI-run simulation and benchmark modes.
-- Deterministic initial conditions and seeded random generation.
-- Timing, energy, and error diagnostics.
+- 2D Barnes–Hut implementation with quadtree.
+- `s/d < θ` node acceptance and aggregated-node force model.
+- Direct `O(N²)` mode for verification.
+- Deterministic CLI-driven benchmark and simulation execution.
+- Seeded initial conditions.
+- Metrics: speed, force error, energy drift, and memory usage.
+- Memory policy: no per-step core allocations.
 
 ### Out-of-scope (initial release)
 
-- Real-time renderer.
-- GPU-accelerated simulation path.
-- 3D octree engine.
-- Distributed/incremental update architecture.
+- Real-time rendering pipeline.
+- GPU compute implementation.
+- 3D octree implementation.
+- Distributed execution.
 
-## 5) Functional requirements
+## 6) Functional requirements
 
-1. The system shall generate particle initial states from command-line input or config.
-2. The system shall compute bounds for each timestep and rebuild a quadtree.
-3. Each node shall store aggregate mass and COM.
-4. For each particle, the system shall traverse the quadtree and apply either:
-   - aggregated node contribution if `s/d < θ`
-   - recursion to children otherwise.
-5. Force law for pair evaluation shall be:
+1. The system shall generate particle initial states from CLI/config and a seed.
+2. The system shall rebuild a bounded quadtree each step from bounds and particle positions.
+3. Each node shall store aggregate `mass` and COM.
+4. Force traversal per particle shall do one of:
+   - use node approximation when `s/d < θ`,
+   - else continue with child traversal.
+5. Pair force model shall use:
    `f_ij = G m_i m_j (r_j - r_i) / (|r_j - r_i|^2 + ε²)^(3/2)`
-6. The system shall provide a direct-force reference mode using the same particle integrator.
-7. The system shall integrate particle states with leapfrog/velocity Verlet as the default.
-8. The system shall support CLI flags:
-   - `--mode`, `--n`, `--steps`, `--dt`, `--theta`, `--epsilon`, `--seed`, `--output`.
-9. The system shall emit per-run output including time splits and validation metrics.
+6. The system shall provide a direct-force reference implementation using the same integrator.
+7. The system shall integrate state with leapfrog/velocity Verlet (default).
+8. The system shall accept CLI flags including:
+    - `--mode`, `--n`, `--steps`, `--dt`, `--theta`, `--epsilon`, `--seed`, `--validate`.
+9. The system shall emit per-run outputs:
+   - phase timings (`build`, `force`, `integrate`),
+   - optional validation metrics (RMS/max position and velocity deltas),
+   - memory usage and occupancy.
+10. The system shall allocate all major core buffers during initialization and reuse them.
+11. The system shall cap node pool capacity and return a deterministic error if a step exceeds capacity.
+12. The system shall support reproducible replay of scenarios from logged configuration.
 
-## 6) Non-functional requirements
+## 7) Performance and memory requirements
 
-- Performance and memory usage shall be controlled by preallocated arrays and reusable buffers.
-- Numeric behavior and simulation results shall be deterministic for a fixed seed.
-- No silent fallback when critical simulation invariants are violated; return explicit errors.
-- The implementation shall remain readable and minimally abstract for phase one.
+- Memory complexity target: `O(N)` with bounded constant factor.
+- Avoid temporary allocations in hot loops, including force loop and integration loop.
+- Particle data must be SoA arrays (`x`, `y`, `vx`, `vy`, `m`) and aligned for cache locality.
+- Quadtree nodes must be a flat array with packed fields, not boxed pointer graphs.
+- Child links must be compact indices, not heap pointers.
+- Traversal and build should use reusable index stacks.
+- Failure policy: if capacity is exceeded, fail fast with explicit diagnostics (N, node count, cause).
 
-## 7) Validation strategy
+## 8) Validation strategy
 
 ### Correctness
 
-- Compare Barnes–Hut output to direct-force mode on fixed scenarios.
-- Report force vector error statistics (max and mean).
-- Report drift in total mechanical energy over short windows.
+- Compare Barnes–Hut against direct mode on fixed scenarios.
+- Report max and mean position/velocity delta metrics for final state.
+- Track total mechanical energy drift as a follow-up phase.
 
 ### Performance
 
-- Report step timings by phase:
+- Measure and log phase timings:
   - bounds/build
   - force solve
   - integration
-- Record crossover behavior where Barnes–Hut overtakes direct-force mode as `N` grows.
+- Report memory metrics:
+  - peak node pool utilization and slack.
+- Record crossover sweep where Barnes–Hut overtakes direct across multiple `N`.
 
 ### Reproducibility
 
-- Same seed + same command must reproduce identical outputs.
-- Logs must include parameters used for each run.
+- Same seed + same configuration yields identical output.
+- Logs include full run parameters and capability flags.
+- Logs include memory-usage trend and buffer-capacity decisions.
 
-## 8) Data model
+## 9) Data model
 
 ### Particle state
 
 - Arrays: `x[]`, `y[]`, `vx[]`, `vy[]`, `m[]`.
+- Reused force accumulators: `ax[]`, `ay[]`.
+- Optional `fx_cache[]`/`fy_cache[]` only if needed and reusable.
 
 ### Quadtree node
 
-- Spatial bounds.
-- `mass`, `com_x`, `com_y`.
-- `body_index` (leaf or internal marker).
-- `child[4]` indices for NW, NE, SW, SE.
+- Fields:
+  - `x_min`, `x_max`, `y_min`, `y_max`
+  - `mass`, `com_x`, `com_y`
+  - `children[4]` indices
+  - `body_index` / `leaf` marker
+- Node storage is fixed-capacity, contiguous, reusable.
 
-## 9) Acceptance criteria
+## 10) Acceptance criteria
 
-- Direct mode is implemented and executable.
-- Barnes–Hut mode completes runs for target `N` with stable output.
-- Verified logs include requested metrics.
-- Measured speedup (or non-regression at high `N`) and bounded error are demonstrated.
+- Direct mode executes and can be used as verification baseline.
+- Barnes–Hut runs complete for target `N` with stable deterministic output.
+- Logs include timing and memory metrics for every run, with optional error metrics when validation is enabled.
+- No per-step allocations in release-critical loops.
+- Node-pool and particle buffers do not grow after initialization.
 
-## 10) Risks and mitigations
+## 11) Risks and mitigations
 
-- Over-clustered states causing deep recursion: mitigate with robust split rules and optional iterative traversal.
-- Near-zero distances: mitigate with softening and minimum-distance guard.
-- Over-aggressive `θ`: mitigate via benchmark-driven tuning and reporting defaults as provisional.
+- Over-clustered particle sets can increase tree depth: mitigate with robust split policy and iterative traversal.
+- Near-zero pair distances: mitigate with softening and minimum-distance guard.
+- Memory cap overrun from unexpected growth: mitigate by preflight `N` checks and explicit hard-stop with actionable diagnostics.
+- Recursion overhead and stack risk: mitigate by iterative traversal in phase one.
 
-## 11) Future scope
+## 12) Future scope
 
-- 3D octree extension.
-- Thread-level parallel force accumulation.
-- Optional adaptive `θ` scheduling.
-
+- SIMD-friendly kernels for force math.
+- Parallel force accumulation with read-only tree sharing.
+- 3D octree and optional adaptive `θ` schedule.

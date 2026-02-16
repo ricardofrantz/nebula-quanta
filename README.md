@@ -2,6 +2,20 @@
 
 A fast, simple Barnes–Hut N-body simulation project in Rust with Bun orchestration.
 
+## About
+
+- Short CLI name: `nq`
+- Binary target: `nq`
+- Distribution shape: Rust crate (`nebula-quanta`) with thin Bun launcher (`run.ts`)
+
+## Topics
+
+- Barnes-Hut
+- N-body simulation
+- Gravity force solvers
+- SoA data layout
+- Performance engineering
+
 ## Why the name
 
 - **Nebula**: suggests a dense particle field and gravitational structure, matching the visual and conceptual model of many interacting masses.
@@ -23,22 +37,38 @@ Compute gravitational interactions efficiently with a minimal, readable implemen
 - **Orchestration layer:** Bun (small CLI runner + benchmark/task scripting).
 - **Algorithm:** 2D quadtree first (Barnes–Hut), with `N²` direct-force path for verification.
 - **Primary control knobs:** `θ` (approximation angle), `ε` (softening), `dt` (time step).
+- **Validation:** `--validate` runs a direct-mode reference and reports RMS/maximum position and velocity deltas.
 
 ## Current repository map
 
 ```text
 .
 ├── README.md
+├── Cargo.toml
 ├── SPEC.md
+├── package.json
 ├── plan.md
 ├── plan_2026-02-16.md
+├── run.ts
 └── src/
-    ├── main.rs       # CLI + config + run loop entry
+    ├── main.rs       # CLI entrypoint
+    ├── config.rs     # CLI flags and modes
     ├── particle.rs   # SoA state and initialization helpers
     ├── tree.rs       # Quadtree and aggregate mass/COM logic
     ├── sim.rs        # force evaluation + integration + diagnostics
     └── direct.rs     # O(N^2) fallback implementation
 ```
+
+## Bootstrap
+
+```bash
+nq --mode=barnes_hut --n 10000 --steps 200 --dt 0.001 --theta 0.6 --epsilon 0.01
+```
+
+The repository now contains a working Rust core with a Bun launcher:
+
+- Barns–Hut mode (`--mode=barnes_hut`) with quadtree-based force approximation.
+- Direct mode (`--mode=direct`) for verification.
 
 ## Planned features
 
@@ -47,7 +77,7 @@ Compute gravitational interactions efficiently with a minimal, readable implemen
 - Deterministic seeded initial conditions
 - Direct-force fallback for correctness validation
 - Step timing split reporting (`build`, `force`, `integrate`)
-- Error and energy diagnostics
+- Optional RMS/max state validation diagnostics
 - Reproducible benchmark mode
 
 ## CLI plan (planned)
@@ -59,14 +89,19 @@ Compute gravitational interactions efficiently with a minimal, readable implemen
 - `--theta` : opening-angle threshold
 - `--epsilon` : softening length
 - `--seed` : RNG seed for reproducibility
-- `--report` : logging cadence
+- `--validate` : run direct-mode cross-check (small workloads)
 
 Example usage (after implementation):
 
 ```bash
-bun run run.ts -- --mode=barnes_hut --n 10000 --steps 200 --dt 0.001 --theta 0.6 --epsilon 0.01
-bun run run.ts -- --mode=direct --validate --n 1024 --steps 20
+nq --mode=barnes_hut --n 10000 --steps 200 --dt 0.001 --theta 0.6 --epsilon 0.01
+nq --mode=direct --validate --n 1024 --steps 20
 ```
+
+## Distribution
+
+- Rust (crates): `cargo install nebula-quanta` then `nq`
+- NPM: `bun run nq` (local CLI wrapper) or install as an npm package later
 
 ## Development philosophy
 

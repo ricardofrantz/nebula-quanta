@@ -1,0 +1,16 @@
+{
+  "name": "nebula-quanta",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "CLI launcher for Nebula Quanta (Nebula-Hut N-body simulation engine).",
+  "keywords": ["barnes-hut", "n-body", "simulation", "rust", "bun"],
+  "bin": {
+    "nq": "run.ts"
+  },
+  "scripts": {
+    "nq": "bun run run.ts",
+    "start": "bun run nq",
+    "run": "bun run nq"
+  }
+}
