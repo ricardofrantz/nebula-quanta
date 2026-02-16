@@ -37,10 +37,16 @@ cargo install --path .
 nq --mode=barnes_hut --n 10000 --steps 200 --dt 0.001 --theta 0.6 --epsilon 0.01
 ```
 
-Local development invocation:
+Local development invocation (release optimized by default):
 
 ```bash
 bun run nq -- --mode=direct --n 1024 --steps 20 --validate --theta 0.7 --epsilon 0.01
+```
+
+Use a debug build when iterating quickly:
+
+```bash
+bun run run:debug -- --mode=direct --n 1024 --steps 20 --validate --theta 0.7 --epsilon 0.01
 ```
 
 ## High-definition + high-FPS workflow

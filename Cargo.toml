@@ -18,3 +18,8 @@ rand_chacha = "0.9.0"
 [[bin]]
 name = "nq"
 path = "src/main.rs"
+
+[profile.release]
+codegen-units = 1
+lto = true
+strip = "symbols"

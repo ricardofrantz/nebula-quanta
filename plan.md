@@ -37,6 +37,7 @@ Implement a max-performance, memory-frugal Barnes–Hut engine with a clear spee
 - ✅ Optional frame capture path is implemented (`--record`, `--frames-dir`, `--width`, `--height`, `--fps`, `--every-steps`) with built `ffmpeg` command output.
 - ✅ Bun launcher remains a thin orchestrator; Rust stays authoritative for numerics.
 - ✅ Memory hard-cap guard now available via `--max-memory-mib` in both run modes.
+- ✅ Big-run execution path now defaults to optimized release builds (`run.ts` uses `--release`, with `--debug` override).
 
 ## Reference source for core algorithm/math
 - Canonical paper: *A hierarchical O(N log N) force-calculation algorithm* (Barnes & Hut, 1986), DOI `10.1038/324446a0`.
