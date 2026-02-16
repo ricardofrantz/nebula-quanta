@@ -19,6 +19,8 @@ pub fn run_direct(
     let mut ax = vec![0.0; n];
     let mut ay = vec![0.0; n];
     let mut recorder = recorder;
+    let workspace_bytes = particle_state_bytes(n);
+    check_memory_budget(args, workspace_bytes)?;
 
     let mut build_elapsed = 0.0;
     let mut force_elapsed = 0.0;
@@ -104,7 +106,24 @@ pub fn compute_direct_accel(particles: &ParticleSoa, epsilon: f64, ax: &mut [f64
 }
 
 fn particle_state_bytes(n: usize) -> usize {
-    n.saturating_mul(5).saturating_mul(F64_BYTES)
+    n.saturating_mul(7).saturating_mul(F64_BYTES)
+}
+
+fn check_memory_budget(args: &Args, workspace_bytes: usize) -> Result<(), String> {
+    let Some(max_memory_mib) = args.max_memory_mib else {
+        return Ok(());
+    };
+
+    let max_memory_bytes = max_memory_mib.checked_mul(1024 * 1024).ok_or_else(|| {
+        format!("invalid --max-memory-mib value (overflow while converting to bytes): {max_memory_mib}")
+    })?;
+    if workspace_bytes > max_memory_bytes {
+        return Err(format!(
+            "memory budget exceeded: workspace estimate {workspace_bytes} bytes > limit {max_memory_bytes} bytes"
+        ));
+    }
+
+    Ok(())
 }
 
 fn particle_bounds(particles: &ParticleSoa) -> Result<(f64, f64, f64, f64), String> {

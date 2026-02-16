@@ -31,4 +31,6 @@ pub struct Args {
     pub fps: u32,
     #[arg(long, default_value_t = 1)]
     pub every_steps: usize,
+    #[arg(long)]
+    pub max_memory_mib: Option<usize>,
 }

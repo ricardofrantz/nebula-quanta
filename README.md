@@ -91,11 +91,12 @@ bun run render capture nebula-quanta-barnes_hut.mp4 60 20 fast libx264
 - `--height <pixels>`
 - `--fps <frames per second>`
 - `--every-steps <n>` (record every nth step)
+- `--max-memory-mib <size>` (hard cap on estimated workspace bytes)
 
 ## Performance profile
 
 ```text
-mode=barnes_hut n=10000 steps=200 theta=0.6 epsilon=0.01 dt=0.001 build_ms=12.34 force_ms=58.91 integrate_ms=4.21 total_ms=75.46 avg_step_ms=0.377 steps_per_sec=2654.7 ns_per_particle_force=294.5 peak_nodes=3801 node_capacity=40001 node_utilization=34.5 workspace_bytes=1234567 bytes_per_particle=128.0 particle_bytes=400000 node_bytes=123456 stack_bytes=16384
+mode=barnes_hut n=10000 steps=200 theta=0.6 epsilon=0.01 dt=0.001 build_ms=12.34 force_ms=58.91 integrate_ms=4.21 total_ms=75.46 avg_step_ms=0.377 steps_per_sec=2654.7 ns_per_particle_force=294.5 peak_nodes=3801 node_capacity=40001 node_utilization=34.5 workspace_bytes=1234567 bytes_per_particle=56.0 particle_bytes=560000 node_bytes=123456 stack_bytes=16384
 ```
 
 ## Core architecture

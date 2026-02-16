@@ -30,6 +30,8 @@ pub fn run_barnes_hut(
     let particle_state_bytes = particle_state_bytes(n);
     let node_pool_bytes = node_pool_bytes(node_capacity);
     let traversal_stack_bytes = traversal_stack_bytes(node_capacity);
+    let workspace_bytes = particle_state_bytes + node_pool_bytes + traversal_stack_bytes;
+    check_memory_budget(args, workspace_bytes)?;
 
     let mut tree = QuadTree::with_capacity(node_capacity);
     let mut ax = vec![0.0; n];
@@ -388,8 +390,25 @@ fn preflight_node_capacity(n: usize) -> Result<usize, String> {
         .ok_or_else(|| "node capacity overflow for requested particle count".to_string())
 }
 
+fn check_memory_budget(args: &Args, workspace_bytes: usize) -> Result<(), String> {
+    let Some(max_memory_mib) = args.max_memory_mib else {
+        return Ok(());
+    };
+
+    let max_memory_bytes = max_memory_mib.checked_mul(1024 * 1024).ok_or_else(|| {
+        format!("invalid --max-memory-mib value (overflow while converting to bytes): {max_memory_mib}")
+    })?;
+    if workspace_bytes > max_memory_bytes {
+        return Err(format!(
+            "memory budget exceeded: workspace estimate {workspace_bytes} bytes > limit {max_memory_bytes} bytes"
+        ));
+    }
+
+    Ok(())
+}
+
 fn particle_state_bytes(n: usize) -> usize {
-    n.saturating_mul(5).saturating_mul(F64_BYTES)
+    n.saturating_mul(7).saturating_mul(F64_BYTES)
 }
 
 fn node_pool_bytes(nodes: usize) -> usize {

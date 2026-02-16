@@ -66,7 +66,7 @@ Optional deterministic frame capture is supported for high-definition offline re
 6. The system shall provide a direct-force reference implementation using the same integrator.
 7. The system shall integrate state with leapfrog/velocity Verlet (default).
 8. The system shall accept CLI flags including:
-    - `--mode`, `--n`, `--steps`, `--dt`, `--theta`, `--epsilon`, `--seed`, `--validate`, `--record`, `--frames-dir`, `--width`, `--height`, `--fps`, `--every-steps`.
+    - `--mode`, `--n`, `--steps`, `--dt`, `--theta`, `--epsilon`, `--seed`, `--validate`, `--record`, `--frames-dir`, `--width`, `--height`, `--fps`, `--every-steps`, `--max-memory-mib`.
 9. The system shall emit per-run outputs:
    - phase timings (`build`, `force`, `integrate`),
    - optional validation metrics (RMS/max position and velocity deltas),
@@ -86,6 +86,7 @@ Optional deterministic frame capture is supported for high-definition offline re
 - Child links must be compact indices, not heap pointers.
 - Traversal and build should use reusable index stacks.
 - Failure policy: if capacity is exceeded, fail fast with explicit diagnostics (N, node count, cause).
+- Runs can be bounded by `--max-memory-mib` as a hard memory estimate cap for direct and Barnes–Hut modes.
 - Recording path must not mutate simulation state or force path timing behavior.
 - Frame encoding must remain a post-run concern (`ffmpeg` external to simulation).
 
