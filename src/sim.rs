@@ -26,10 +26,11 @@ pub fn run_barnes_hut(
     }
 
     let n = particles.len();
+    let thread_count = args.threads.max(1);
     let node_capacity = preflight_node_capacity(n)?;
     let particle_state_bytes = particle_state_bytes(n);
     let node_pool_bytes = node_pool_bytes(node_capacity);
-    let traversal_stack_bytes = traversal_stack_bytes(node_capacity);
+    let traversal_stack_bytes = traversal_stack_bytes(node_capacity, thread_count);
     let workspace_bytes = particle_state_bytes + node_pool_bytes + traversal_stack_bytes;
     check_memory_budget(args, workspace_bytes)?;
 
@@ -60,6 +61,7 @@ pub fn run_barnes_hut(
         &tree,
         args.theta,
         args.epsilon,
+        thread_count,
         &mut ax,
         &mut ay,
         &mut traversal,
@@ -93,6 +95,7 @@ pub fn run_barnes_hut(
             &tree,
             args.theta,
             args.epsilon,
+            thread_count,
             &mut ax,
             &mut ay,
             &mut traversal,
@@ -317,6 +320,7 @@ fn compute_accel_barnes_hut(
     tree: &QuadTree,
     theta: f64,
     epsilon: f64,
+    thread_count: usize,
     ax: &mut [f64],
     ay: &mut [f64],
     stack: &mut Vec<usize>,
@@ -326,56 +330,165 @@ fn compute_accel_barnes_hut(
         return Ok(());
     }
 
-    let eps2 = epsilon * epsilon;
     let theta2 = theta * theta;
+    let eps2 = epsilon * epsilon;
 
-    for i in 0..n {
-        ax[i] = 0.0;
-        ay[i] = 0.0;
-        stack.clear();
-        stack.push(0);
+    if thread_count <= 1 {
+        for i in 0..n {
+            let (force_x, force_y) = compute_particle_force(
+                i,
+                particles,
+                &tree.nodes,
+                theta2,
+                eps2,
+                stack,
+            );
+            ax[i] = force_x;
+            ay[i] = force_y;
+        }
+        return Ok(());
+    }
 
-        while let Some(node_idx) = stack.pop() {
-            let node = &tree.nodes[node_idx];
-            if node.mass <= 0.0 {
-                continue;
-            }
+    compute_accel_barnes_hut_parallel(
+        particles,
+        &tree.nodes,
+        theta2,
+        eps2,
+        thread_count,
+        stack,
+        ax,
+        ay,
+    )?;
 
-            let dx = node.com_x - particles.x[i];
-            let dy = node.com_y - particles.y[i];
-            let dist2 = dx * dx + dy * dy;
-            let dist2_soft = dist2 + eps2;
-            if dist2_soft <= 0.0 {
-                continue;
-            }
+    Ok(())
+}
 
-            if node.body_idx >= 0 {
-                let body = node.body_idx as usize;
-                if body != i {
-                    let inv_r3 = 1.0 / (dist2_soft * dist2_soft.sqrt());
-                    let coeff = G * particles.m[body] * inv_r3;
-                    ax[i] += coeff * dx;
-                    ay[i] += coeff * dy;
-                }
-                continue;
-            }
+fn compute_particle_force(
+    i: usize,
+    particles: &ParticleSoa,
+    nodes: &[Node],
+    theta2: f64,
+    eps2: f64,
+    stack: &mut Vec<usize>,
+) -> (f64, f64) {
+    let mut force_x = 0.0;
+    let mut force_y = 0.0;
+    let xi = particles.x[i];
+    let yi = particles.y[i];
 
-            let size = node.size();
-            if size * size <= theta2 * dist2 {
+    stack.clear();
+    stack.push(0);
+
+    while let Some(node_idx) = stack.pop() {
+        let node = &nodes[node_idx];
+        if node.mass <= 0.0 {
+            continue;
+        }
+
+        let dx = node.com_x - xi;
+        let dy = node.com_y - yi;
+        let dist2 = dx * dx + dy * dy;
+        let dist2_soft = dist2 + eps2;
+        if dist2_soft <= 0.0 {
+            continue;
+        }
+
+        if node.body_idx >= 0 {
+            let body = node.body_idx as usize;
+            if body != i {
                 let inv_r3 = 1.0 / (dist2_soft * dist2_soft.sqrt());
-                let coeff = G * node.mass * inv_r3;
-                ax[i] += coeff * dx;
-                ay[i] += coeff * dy;
-                continue;
+                let coeff = G * particles.m[body] * inv_r3;
+                force_x += coeff * dx;
+                force_y += coeff * dy;
             }
+            continue;
+        }
 
-            for child in &node.children {
-                if *child >= 0 {
-                    stack.push(*child as usize);
-                }
+        let size = node.size();
+        if size * size <= theta2 * dist2 {
+            let inv_r3 = 1.0 / (dist2_soft * dist2_soft.sqrt());
+            let coeff = G * node.mass * inv_r3;
+            force_x += coeff * dx;
+            force_y += coeff * dy;
+            continue;
+        }
+
+        for child in &node.children {
+            if *child >= 0 {
+                stack.push(*child as usize);
             }
         }
     }
+
+    (force_x, force_y)
+}
+
+fn compute_accel_barnes_hut_parallel(
+    particles: &ParticleSoa,
+    nodes: &[Node],
+    theta2: f64,
+    eps2: f64,
+    thread_count: usize,
+    stack: &mut Vec<usize>,
+    ax: &mut [f64],
+    ay: &mut [f64],
+) -> Result<(), String> {
+    if thread_count <= 1 {
+        return Ok(());
+    }
+
+    let n = particles.len();
+    let active_threads = thread_count.min(n);
+    if active_threads <= 1 {
+        for i in 0..n {
+            let (force_x, force_y) = compute_particle_force(i, particles, nodes, theta2, eps2, stack);
+            ax[i] = force_x;
+            ay[i] = force_y;
+        }
+        return Ok(());
+    }
+
+    let chunk = n.div_ceil(active_threads);
+    let stack_capacity = stack.capacity().max(1);
+
+    std::thread::scope(|scope| {
+        let mut start = 0usize;
+        let mut ax_tail = ax;
+        let mut ay_tail = ay;
+        for _ in 0..active_threads {
+            let end = (start + chunk).min(n);
+            if start >= end {
+                break;
+            }
+            let len = end - start;
+
+            let (chunk_ax, rest_ax) = ax_tail.split_at_mut(len);
+            let (chunk_ay, rest_ay) = ay_tail.split_at_mut(len);
+            ax_tail = rest_ax;
+            ay_tail = rest_ay;
+
+            let chunk_start = start;
+            scope.spawn(move || {
+                let mut local_stack: Vec<usize> = Vec::with_capacity(stack_capacity);
+
+                for offset in 0..len {
+                    let particle_idx = chunk_start + offset;
+                    let (force_x, force_y) = compute_particle_force(
+                        particle_idx,
+                        particles,
+                        nodes,
+                        theta2,
+                        eps2,
+                        &mut local_stack,
+                    );
+                    chunk_ax[offset] = force_x;
+                    chunk_ay[offset] = force_y;
+                }
+            });
+
+            start = end;
+        }
+    });
 
     Ok(())
 }
@@ -415,6 +528,9 @@ fn node_pool_bytes(nodes: usize) -> usize {
     nodes.saturating_mul(NODE_BYTES)
 }
 
-fn traversal_stack_bytes(slots: usize) -> usize {
-    slots.saturating_mul(USIZE_BYTES)
+fn traversal_stack_bytes(slots: usize, thread_count: usize) -> usize {
+    let active_threads = thread_count.max(1);
+    slots
+        .saturating_mul(active_threads)
+        .saturating_mul(USIZE_BYTES)
 }

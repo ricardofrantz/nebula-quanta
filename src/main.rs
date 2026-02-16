@@ -21,6 +21,10 @@ fn main() {
         eprintln!("N must be greater than zero");
         return;
     }
+    if args.threads == 0 {
+        eprintln!("--threads must be at least one");
+        return;
+    }
 
     let mut particles = ParticleSoa::random(args.n, args.seed);
     let validate_particles = if should_validate(&args) {
@@ -57,13 +61,14 @@ fn main() {
     match result {
         Ok((mode_name, stats)) => {
             println!(
-                "mode={} n={} steps={} theta={} epsilon={} dt={} build_ms={:.3} force_ms={:.3} integrate_ms={:.3} total_ms={:.3} avg_step_ms={:.3} steps_per_sec={:.3} ns_per_particle_force={:.1} peak_nodes={} node_capacity={} node_utilization={:.2}% workspace_bytes={} bytes_per_particle={:.1} particle_bytes={} node_bytes={} stack_bytes={}",
+                "mode={} n={} steps={} theta={} epsilon={} dt={} threads={} build_ms={:.3} force_ms={:.3} integrate_ms={:.3} total_ms={:.3} avg_step_ms={:.3} steps_per_sec={:.3} ns_per_particle_force={:.1} peak_nodes={} node_capacity={} node_utilization={:.2}% workspace_bytes={} bytes_per_particle={:.1} particle_bytes={} node_bytes={} stack_bytes={}",
                 mode_name,
                 args.n,
                 args.steps,
                 args.theta,
                 args.epsilon,
                 args.dt,
+                args.threads,
                 stats.build_ms,
                 stats.force_ms,
                 stats.integrate_ms,

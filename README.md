@@ -81,6 +81,16 @@ scripts/render_video.sh capture nebula-quanta-barnes_hut.mp4 60 20 fast libx264
 bun run render capture nebula-quanta-barnes_hut.mp4 60 20 fast libx264
 ```
 
+## Benchmark sweep
+
+Use the repository helper to sweep `θ` and thread counts for speed/accuracy tradeoffs:
+
+```bash
+scripts/bench_sweep.sh --n 20000 --steps 200 --dt 0.0008 --epsilon 0.01 --theta 0.3,0.5,0.7,1.0 --threads 1,4
+```
+
+The helper prints `nq` logs for each run so you can compare `steps_per_sec` and `ns_per_particle_force` directly.
+
 ## CLI controls
 
 - `--mode barnes_hut|direct`
@@ -97,12 +107,13 @@ bun run render capture nebula-quanta-barnes_hut.mp4 60 20 fast libx264
 - `--height <pixels>`
 - `--fps <frames per second>`
 - `--every-steps <n>` (record every nth step)
+- `--threads <n>` (Barnes–Hut force threads; use 1 for deterministic single-thread baseline)
 - `--max-memory-mib <size>` (hard cap on estimated workspace bytes)
 
 ## Performance profile
 
 ```text
-mode=barnes_hut n=10000 steps=200 theta=0.6 epsilon=0.01 dt=0.001 build_ms=12.34 force_ms=58.91 integrate_ms=4.21 total_ms=75.46 avg_step_ms=0.377 steps_per_sec=2654.7 ns_per_particle_force=294.5 peak_nodes=3801 node_capacity=40001 node_utilization=34.5 workspace_bytes=1234567 bytes_per_particle=56.0 particle_bytes=560000 node_bytes=123456 stack_bytes=16384
+mode=barnes_hut n=10000 steps=200 theta=0.6 epsilon=0.01 dt=0.001 threads=1 build_ms=12.34 force_ms=58.91 integrate_ms=4.21 total_ms=75.46 avg_step_ms=0.377 steps_per_sec=2654.7 ns_per_particle_force=294.5 peak_nodes=3801 node_capacity=40001 node_utilization=34.5 workspace_bytes=1234567 bytes_per_particle=56.0 particle_bytes=560000 node_bytes=123456 stack_bytes=16384
 ```
 
 ## Core architecture

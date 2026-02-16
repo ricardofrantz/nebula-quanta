@@ -66,7 +66,8 @@ Optional deterministic frame capture is supported for high-definition offline re
 6. The system shall provide a direct-force reference implementation using the same integrator.
 7. The system shall integrate state with leapfrog/velocity Verlet (default).
 8. The system shall accept CLI flags including:
-    - `--mode`, `--n`, `--steps`, `--dt`, `--theta`, `--epsilon`, `--seed`, `--validate`, `--record`, `--frames-dir`, `--width`, `--height`, `--fps`, `--every-steps`, `--max-memory-mib`.
+    - `--mode`, `--n`, `--steps`, `--dt`, `--theta`, `--epsilon`, `--seed`, `--validate`, `--record`, `--frames-dir`, `--width`, `--height`, `--fps`, `--every-steps`, `--threads`, `--max-memory-mib`.
+    - When `--threads > 1`, Barnes–Hut force evaluation is partitioned by particle range across worker threads.
 9. The system shall emit per-run outputs:
    - phase timings (`build`, `force`, `integrate`),
    - optional validation metrics (RMS/max position and velocity deltas),
@@ -89,6 +90,7 @@ Optional deterministic frame capture is supported for high-definition offline re
 - Runs can be bounded by `--max-memory-mib` as a hard memory estimate cap for direct and Barnes–Hut modes.
 - Recording path must not mutate simulation state or force path timing behavior.
 - Frame encoding must remain a post-run concern (`ffmpeg` external to simulation).
+- Threaded Barnes–Hut runs include an additional per-thread traversal-stack bound in the memory estimate.
 
 ## 8) Validation strategy
 
@@ -160,5 +162,5 @@ Optional deterministic frame capture is supported for high-definition offline re
 ## 12) Future scope
 
 - SIMD-friendly kernels for force math.
-- Parallel force accumulation with read-only tree sharing.
+- Threaded force accumulation with read-only tree sharing.
 - 3D octree and optional adaptive `θ` schedule.

@@ -38,6 +38,8 @@ Implement a max-performance, memory-frugal Barnes–Hut engine with a clear spee
 - ✅ Bun launcher remains a thin orchestrator; Rust stays authoritative for numerics.
 - ✅ Memory hard-cap guard now available via `--max-memory-mib` in both run modes.
 - ✅ Big-run execution path now defaults to optimized release builds (`run.ts` uses `--release`, with `--debug` override).
+- ✅ Benchmark sweep helper added (`scripts/bench_sweep.sh`) and `bun run bench`.
+- ✅ Multi-threaded Barnes–Hut force accumulation is available via `--threads`.
 
 ## Reference source for core algorithm/math
 - Canonical paper: *A hierarchical O(N log N) force-calculation algorithm* (Barnes & Hut, 1986), DOI `10.1038/324446a0`.
@@ -151,7 +153,7 @@ Implement a max-performance, memory-frugal Barnes–Hut engine with a clear spee
 - Tune by measurement:
   - run short sweeps on candidate `θ` values (for example `0.3, 0.5, 0.7, 1.0`),
   - choose the smallest `θ` meeting speed/accuracy targets.
-- Introduce optional parallelism in force accumulation (`rayon`) only after single-thread tuning is complete.
+- Introduce optional parallelism in force accumulation (`std::thread` scoped workers) and benchmark with `scripts/bench_sweep.sh` and `bun run bench`.
 - Add capture I/O budgeting separately from physics timing:
   - measure frame write throughput and filesystem bottlenecks with fixed cadence.
   - confirm simulation timing is unchanged when recording is off.
