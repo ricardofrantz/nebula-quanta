@@ -91,6 +91,16 @@ scripts/bench_sweep.sh --n 20000 --steps 200 --dt 0.0008 --epsilon 0.01 --theta 
 
 The helper prints `nq` logs for each run so you can compare `steps_per_sec` and `ns_per_particle_force` directly.
 
+You can also emit structured results as CSV for downstream analysis:
+
+```bash
+scripts/bench_sweep.sh \
+  --n 20000 --steps 200 --dt 0.0008 --epsilon 0.01 \
+  --theta 0.3,0.5,0.7,1.0 --threads 1,4 --csv bench_results.csv
+```
+
+The CSV includes all parsed fields from the benchmark profile line, including timing, throughput, and memory telemetry.
+
 ## CLI controls
 
 - `--mode barnes_hut|direct`
@@ -109,6 +119,7 @@ The helper prints `nq` logs for each run so you can compare `steps_per_sec` and 
 - `--every-steps <n>` (record every nth step)
 - `--threads <n>` (Barnes–Hut force threads; use 1 for deterministic single-thread baseline)
 - `--max-memory-mib <size>` (hard cap on estimated workspace bytes)
+- `--csv <path>` (write benchmark summary rows to a CSV file; includes all parsed timing/metric columns)
 
 ## Performance profile
 
