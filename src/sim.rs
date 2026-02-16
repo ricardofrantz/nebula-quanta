@@ -1,3 +1,4 @@
+use std::mem::size_of;
 use std::time::Instant;
 
 use crate::{
@@ -24,6 +25,9 @@ pub fn run_barnes_hut(particles: &mut ParticleSoa, args: &Args) -> Result<RunSta
         .checked_mul(4)
         .and_then(|v| v.checked_add(1))
         .ok_or_else(|| "node capacity overflow for requested particle count".to_string())?;
+    let particle_state_bytes = particle_state_bytes(n);
+    let node_pool_bytes = node_pool_bytes(node_capacity);
+    let traversal_stack_bytes = traversal_stack_bytes(node_capacity);
 
     let mut tree = QuadTree::with_capacity(node_capacity);
     let mut ax = vec![0.0; n];
@@ -96,6 +100,10 @@ pub fn run_barnes_hut(particles: &mut ParticleSoa, args: &Args) -> Result<RunSta
         integrate_ms: integrate_elapsed,
         peak_node_count,
         node_capacity,
+        particle_count: n,
+        particle_bytes: particle_state_bytes,
+        node_pool_bytes,
+        traversal_stack_bytes,
     })
 }
 
@@ -336,7 +344,7 @@ fn compute_accel_barnes_hut(
             }
 
             let size = node.size();
-            if size * size <= theta2 * dist2_soft {
+            if size * size <= theta2 * dist2 {
                 let inv_r3 = 1.0 / (dist2_soft * dist2_soft.sqrt());
                 let coeff = G * node.mass * inv_r3;
                 ax[i] += coeff * dx;
@@ -353,4 +361,20 @@ fn compute_accel_barnes_hut(
     }
 
     Ok(())
+}
+
+const F64_BYTES: usize = size_of::<f64>();
+const NODE_BYTES: usize = size_of::<Node>();
+const USIZE_BYTES: usize = size_of::<usize>();
+
+fn particle_state_bytes(n: usize) -> usize {
+    n.saturating_mul(5).saturating_mul(F64_BYTES)
+}
+
+fn node_pool_bytes(nodes: usize) -> usize {
+    nodes.saturating_mul(NODE_BYTES)
+}
+
+fn traversal_stack_bytes(slots: usize) -> usize {
+    slots.saturating_mul(USIZE_BYTES)
 }

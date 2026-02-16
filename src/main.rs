@@ -44,7 +44,7 @@ fn main() {
     match result {
         Ok((mode_name, stats)) => {
             println!(
-                "mode={} n={} steps={} theta={} epsilon={} dt={} build_ms={:.3} force_ms={:.3} integrate_ms={:.3} peak_nodes={} node_capacity={} ",
+                "mode={} n={} steps={} theta={} epsilon={} dt={} build_ms={:.3} force_ms={:.3} integrate_ms={:.3} peak_nodes={} node_capacity={} node_utilization={:.2}% workspace_bytes={} bytes_per_particle={:.1} particle_bytes={} node_bytes={} stack_bytes={}",
                 mode_name,
                 args.n,
                 args.steps,
@@ -56,6 +56,12 @@ fn main() {
                 stats.integrate_ms,
                 stats.peak_node_count,
                 stats.node_capacity,
+                stats.node_utilization() * 100.0,
+                stats.workspace_bytes(),
+                stats.bytes_per_particle(),
+                stats.particle_bytes,
+                stats.node_pool_bytes,
+                stats.traversal_stack_bytes,
             );
 
             if let Some(reference_particles) = validate_particles {

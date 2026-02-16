@@ -1,8 +1,10 @@
 use std::time::Instant;
+use std::mem::size_of;
 
 use crate::{config::Args, particle::ParticleSoa, stats::RunStats};
 
 const G: f64 = 1.0;
+const F64_BYTES: usize = size_of::<f64>();
 
 pub fn run_direct(particles: &mut ParticleSoa, args: &Args) -> Result<RunStats, String> {
     if particles.len() == 0 {
@@ -52,6 +54,10 @@ pub fn run_direct(particles: &mut ParticleSoa, args: &Args) -> Result<RunStats, 
         integrate_ms: integrate_elapsed,
         peak_node_count: 0,
         node_capacity: 0,
+        particle_count: n,
+        particle_bytes: particle_state_bytes(n),
+        node_pool_bytes: 0,
+        traversal_stack_bytes: 0,
     })
 }
 
@@ -84,4 +90,8 @@ pub fn compute_direct_accel(particles: &ParticleSoa, epsilon: f64, ax: &mut [f64
             ay[j] -= coeff_j * dy;
         }
     }
+}
+
+fn particle_state_bytes(n: usize) -> usize {
+    n.saturating_mul(5).saturating_mul(F64_BYTES)
 }
