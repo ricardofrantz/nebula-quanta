@@ -69,7 +69,7 @@ pub fn run_barnes_hut(
         args.theta,
         args.epsilon,
         args.g,
-        thread_count,
+        active_threads,
         &mut traversal,
         &mut traversal_stacks,
         &mut ax,
@@ -98,7 +98,7 @@ pub fn run_barnes_hut(
                     args.epsilon,
                     args.g,
                     args.dt,
-                    thread_count,
+                    active_threads,
                     &ax,
                     &ay,
                     &mut rk2_ax,
@@ -127,7 +127,7 @@ pub fn run_barnes_hut(
             args.theta,
             args.epsilon,
             args.g,
-            thread_count,
+            active_threads,
             &mut traversal,
             &mut traversal_stacks,
             &mut ax,
@@ -186,7 +186,6 @@ fn integrate_rk2_step(
         mid_particles.y[i] = particles.y[i] + particles.vy[i] * 0.5 * dt;
         mid_particles.vx[i] = vx_half;
         mid_particles.vy[i] = vy_half;
-        mid_particles.m[i] = particles.m[i];
     }
 
     build_tree(tree, mid_particles)?;
@@ -499,7 +498,7 @@ fn compute_particle_force(
         }
 
         let size = node.size();
-        if size * size <= theta2 * dist2 {
+        if size * size <= theta2 * dist2_soft {
             let inv_r3 = 1.0 / (dist2_soft * dist2_soft.sqrt());
             let coeff = g * node.mass * inv_r3;
             force_x += coeff * dx;
@@ -644,8 +643,13 @@ fn traversal_stack_bytes(slots: usize, thread_count: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{run_barnes_hut, preflight_node_capacity};
-    use crate::{config::Args, direct::run_direct, particle::ParticleSoa};
+    use super::{
+        build_tree,
+        compute_accel_barnes_hut,
+        preflight_node_capacity,
+        run_barnes_hut,
+    };
+    use crate::{config::Args, direct::compute_direct_accel_with_g, direct::run_direct, particle::ParticleSoa, tree::QuadTree};
 
     #[test]
     fn rk2_integration_matches_direct_when_treated_as_direct() -> Result<(), String> {
@@ -711,6 +715,79 @@ mod tests {
             assert_eq!(barnes.y[i], direct.y[i]);
             assert_eq!(barnes.vx[i], direct.vx[i]);
             assert_eq!(barnes.vy[i], direct.vy[i]);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn bh_force_matches_direct_for_small_theta_single_thread() -> Result<(), String> {
+        let n = 128usize;
+        let args = Args::parse_from([
+            "nq",
+            "--n",
+            "128",
+            "--steps",
+            "1",
+            "--dt",
+            "0.001",
+            "--theta",
+            "0.0001",
+            "--epsilon",
+            "0.01",
+            "--g",
+            "0.9",
+            "--integrator",
+            "leapfrog",
+            "--seed",
+            "777",
+        ]);
+        let mut particles = ParticleSoa::random_with_profiles(
+            n,
+            args.seed,
+            args.init,
+            args.init_radius,
+            args.init_spread,
+            args.init_v_amp,
+            args.init_lambda,
+            args.init_center_x,
+            args.init_center_y,
+            args.mass_profile,
+            args.mass_mean,
+            args.mass_stddev,
+            args.mass_min,
+            args.mass_max,
+            args.mass_alpha,
+        );
+        let mut tree = QuadTree::with_capacity(preflight_node_capacity(n)?);
+        build_tree(&mut tree, &particles)?;
+
+        let mut bh_ax = vec![0.0; n];
+        let mut bh_ay = vec![0.0; n];
+        let mut stack = Vec::with_capacity(preflight_node_capacity(n)?);
+        let mut stacks = vec![Vec::with_capacity(preflight_node_capacity(n)?); 1];
+        compute_accel_barnes_hut(
+            &particles,
+            &tree,
+            args.theta,
+            args.epsilon,
+            args.g,
+            1,
+            &mut stack,
+            &mut stacks,
+            &mut bh_ax,
+            &mut bh_ay,
+        )?;
+
+        let mut direct_ax = vec![0.0; n];
+        let mut direct_ay = vec![0.0; n];
+        compute_direct_accel_with_g(&particles, args.epsilon, args.g, &mut direct_ax, &mut direct_ay);
+
+        for i in 0..n {
+            let dx = (bh_ax[i] - direct_ax[i]).abs();
+            let dy = (bh_ay[i] - direct_ay[i]).abs();
+            assert!(dx < 1e-8, "x force mismatch at idx {i}: {}", dx);
+            assert!(dy < 1e-8, "y force mismatch at idx {i}: {}", dy);
         }
 
         Ok(())
