@@ -14,6 +14,7 @@ Options:
   --theta <comma-separated list>    (default: 0.3,0.5,0.7,1.0)
   --threads <comma-separated list>  (default: 1)
   --mode <barnes_hut|direct>        (default: barnes_hut)
+  --csv <path>                      (optional CSV output target)
   --help
 USAGE
 }
@@ -25,6 +26,7 @@ EPSILON=0.01
 THETAS=0.3,0.5,0.7,1.0
 THREADS=1
 MODE=barnes_hut
+CSV_OUT=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -54,6 +56,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --mode)
       MODE=$2
+      shift 2
+      ;;
+    --csv)
+      CSV_OUT=$2
       shift 2
       ;;
     --help|-h)
@@ -87,7 +93,48 @@ for theta in "${THE_LIST[@]}"; do
     fi
 
     echo "===== theta=$theta threads=$thread_count ====="
-    "${CMD[@]}"
+    tmp_output=$(mktemp)
+
+    if ! "${CMD[@]}" | tee "$tmp_output"; then
+      rm -f "$tmp_output"
+      exit 1
+    fi
+
+    if [[ -n "$CSV_OUT" ]]; then
+      summary_line=$(rg '^mode=' "$tmp_output" | tail -n 1 || true)
+      if [[ -z "$summary_line" ]]; then
+        echo "unable to capture benchmark summary line for theta=$theta threads=$thread_count" >&2
+        rm -f "$tmp_output"
+        exit 1
+      fi
+
+      field() {
+        local key="$1"
+        local line="$2"
+        echo "$line" | awk -v key="$key" '
+          {
+            for (i = 1; i <= NF; i++) {
+              split($i, parts, "=");
+              if (parts[1] == key) {
+                print parts[2];
+              }
+            }
+          }
+        '
+      }
+
+      if [[ ! -s "$CSV_OUT" ]]; then
+        {
+          echo "theta,threads,mode,n,steps,dt,theta_value,epsilon,build_ms,force_ms,integrate_ms,total_ms,avg_step_ms,steps_per_sec,ns_per_particle_force,peak_nodes,node_capacity,node_utilization,workspace_bytes,bytes_per_particle,particle_bytes,node_bytes,stack_bytes"
+        } > "$CSV_OUT"
+      fi
+
+      {
+        echo "$(field theta "$summary_line"),$(field threads "$summary_line"),$(field mode "$summary_line"),$(field n "$summary_line"),$(field steps "$summary_line"),$(field dt "$summary_line"),$(field theta "$summary_line"),$(field epsilon "$summary_line"),$(field build_ms "$summary_line"),$(field force_ms "$summary_line"),$(field integrate_ms "$summary_line"),$(field total_ms "$summary_line"),$(field avg_step_ms "$summary_line"),$(field steps_per_sec "$summary_line"),$(field ns_per_particle_force "$summary_line"),$(field peak_nodes "$summary_line"),$(field node_capacity "$summary_line"),$(field node_utilization "$summary_line"),$(field workspace_bytes "$summary_line"),$(field bytes_per_particle "$summary_line"),$(field particle_bytes "$summary_line"),$(field node_bytes "$summary_line"),$(field stack_bytes "$summary_line")"
+      } >> "$CSV_OUT"
+    fi
+
+    rm -f "$tmp_output"
     echo
   done
 done
