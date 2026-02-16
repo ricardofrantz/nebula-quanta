@@ -15,6 +15,11 @@
     "bench": "bash scripts/bench_sweep.sh",
     "bench:smoke": "bash scripts/smoke_bench_sweep.sh",
     "run:debug": "bun run run.ts --debug",
-    "render": "bash scripts/render_video.sh"
+    "render": "bash scripts/render_video.sh",
+    "render:preset": "bash scripts/render_presets.sh",
+    "render:hd30": "bash scripts/render_presets.sh --preset hd30",
+    "render:hd60": "bash scripts/render_presets.sh --preset hd60",
+    "render:hq30": "bash scripts/render_presets.sh --preset hq30",
+    "render:hq60": "bash scripts/render_presets.sh --preset hq60"
   }
 }

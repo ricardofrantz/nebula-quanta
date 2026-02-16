@@ -19,6 +19,10 @@ rand_chacha = "0.9.0"
 name = "nq"
 path = "src/main.rs"
 
+[features]
+default = []
+simd = []
+
 [profile.release]
 codegen-units = 1
 lto = true

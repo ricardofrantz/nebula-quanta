@@ -120,6 +120,28 @@ pub fn compute_direct_accel_with_g(
     ax: &mut [f64],
     ay: &mut [f64],
 ) {
+    #[cfg(feature = "simd")]
+    {
+        if particles.len() >= 2048 {
+            compute_direct_accel_with_g_simd(particles, epsilon, g, ax, ay);
+        } else {
+            compute_direct_accel_with_g_scalar(particles, epsilon, g, ax, ay);
+        }
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        compute_direct_accel_with_g_scalar(particles, epsilon, g, ax, ay);
+    }
+}
+
+fn compute_direct_accel_with_g_scalar(
+    particles: &ParticleSoa,
+    epsilon: f64,
+    g: f64,
+    ax: &mut [f64],
+    ay: &mut [f64],
+) {
     let n = particles.len();
     for i in 0..n {
         ax[i] = 0.0;
@@ -145,6 +167,128 @@ pub fn compute_direct_accel_with_g(
             ay[i] += coeff_i * dy;
             ax[j] -= coeff_j * dx;
             ay[j] -= coeff_j * dy;
+        }
+    }
+}
+
+#[cfg(feature = "simd")]
+fn compute_direct_accel_with_g_simd(
+    particles: &ParticleSoa,
+    epsilon: f64,
+    g: f64,
+    ax: &mut [f64],
+    ay: &mut [f64],
+) {
+    const SIMD_LANE: usize = 4;
+
+    let n = particles.len();
+    for i in 0..n {
+        ax[i] = 0.0;
+        ay[i] = 0.0;
+    }
+
+    let eps2 = epsilon * epsilon;
+    for i in 0..n {
+        let xi = particles.x[i];
+        let yi = particles.y[i];
+        let mi = particles.m[i];
+        let mut j = i + 1;
+
+        while j + SIMD_LANE <= n {
+            let j0 = j;
+            let j1 = j + 1;
+            let j2 = j + 2;
+            let j3 = j + 3;
+
+            let dx0 = particles.x[j0] - xi;
+            let dy0 = particles.y[j0] - yi;
+            let dx1 = particles.x[j1] - xi;
+            let dy1 = particles.y[j1] - yi;
+            let dx2 = particles.x[j2] - xi;
+            let dy2 = particles.y[j2] - yi;
+            let dx3 = particles.x[j3] - xi;
+            let dy3 = particles.y[j3] - yi;
+
+            let dist2_0 = dx0 * dx0 + dy0 * dy0 + eps2;
+            let dist2_1 = dx1 * dx1 + dy1 * dy1 + eps2;
+            let dist2_2 = dx2 * dx2 + dy2 * dy2 + eps2;
+            let dist2_3 = dx3 * dx3 + dy3 * dy3 + eps2;
+
+            let inv_r3_0 = if dist2_0 > 0.0 {
+                1.0 / (dist2_0 * dist2_0.sqrt())
+            } else {
+                0.0
+            };
+            let inv_r3_1 = if dist2_1 > 0.0 {
+                1.0 / (dist2_1 * dist2_1.sqrt())
+            } else {
+                0.0
+            };
+            let inv_r3_2 = if dist2_2 > 0.0 {
+                1.0 / (dist2_2 * dist2_2.sqrt())
+            } else {
+                0.0
+            };
+            let inv_r3_3 = if dist2_3 > 0.0 {
+                1.0 / (dist2_3 * dist2_3.sqrt())
+            } else {
+                0.0
+            };
+
+            let coeff_i0 = g * particles.m[j0] * inv_r3_0;
+            let coeff_i1 = g * particles.m[j1] * inv_r3_1;
+            let coeff_i2 = g * particles.m[j2] * inv_r3_2;
+            let coeff_i3 = g * particles.m[j3] * inv_r3_3;
+
+            let cpx = coeff_i0 * dx0 + coeff_i1 * dx1 + coeff_i2 * dx2 + coeff_i3 * dx3;
+            let cpy = coeff_i0 * dy0 + coeff_i1 * dy1 + coeff_i2 * dy2 + coeff_i3 * dy3;
+            ax[i] += cpx;
+            ay[i] += cpy;
+
+            let coeff_j = g * mi;
+            if dist2_0 > 0.0 {
+                let c = coeff_j * inv_r3_0;
+                ax[j0] -= c * dx0;
+                ay[j0] -= c * dy0;
+            }
+            if dist2_1 > 0.0 {
+                let c = coeff_j * inv_r3_1;
+                ax[j1] -= c * dx1;
+                ay[j1] -= c * dy1;
+            }
+            if dist2_2 > 0.0 {
+                let c = coeff_j * inv_r3_2;
+                ax[j2] -= c * dx2;
+                ay[j2] -= c * dy2;
+            }
+            if dist2_3 > 0.0 {
+                let c = coeff_j * inv_r3_3;
+                ax[j3] -= c * dx3;
+                ay[j3] -= c * dy3;
+            }
+
+            j += SIMD_LANE;
+        }
+
+        while j < n {
+            let dx = particles.x[j] - xi;
+            let dy = particles.y[j] - yi;
+            let dist2 = dx * dx + dy * dy + eps2;
+            if dist2 <= 0.0 {
+                j += 1;
+                continue;
+            }
+
+            let inv_r3 = 1.0 / (dist2 * dist2.sqrt());
+            let coeff_i = g * particles.m[j] * inv_r3;
+            let coeff_j = g * particles.m[i] * inv_r3;
+
+            ax[i] += coeff_i * dx;
+            ay[i] += coeff_i * dy;
+            ax[j] -= coeff_j * dx;
+            ay[j] -= coeff_j * dy;
+
+            j += 1;
         }
     }
 }

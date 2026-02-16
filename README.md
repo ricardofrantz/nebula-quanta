@@ -27,6 +27,7 @@ The short executable name is `nq` and the Rust crate is `nebula-quanta`.
 - Deterministic benchmarks
 - High-rate frame capture
 - Offline MP4 rendering
+- Render presets and frame-rate budget helpers
 - Memory telemetry
 - Energy/momentum diagnostics
 
@@ -103,6 +104,21 @@ scripts/render_video.sh capture nebula-quanta-barnes_hut.mp4 60 20 fast libx264
 
 ```bash
 bun run render capture nebula-quanta-barnes_hut.mp4 60 20 fast libx264
+```
+
+Use one-click render profiles with estimates:
+
+```bash
+scripts/render_presets.sh ./capture nebula-quanta-barnes_hut.mp4 --preset hd60
+scripts/render_presets.sh ./capture nebula-quanta-barnes_hut-hq.mp4 --preset hq30
+```
+
+`render_presets.sh` prints estimated run duration before launching ffmpeg.
+
+To enable the SIMD-friendly direct kernel, build/run with:
+
+```bash
+cargo run --release --features simd -- --mode direct --n 4096 --steps 1 --theta 0
 ```
 
 ## Benchmark sweep
@@ -200,6 +216,7 @@ bun run nq -- --preset fast --theta 0.35 --dt 0.0005 --threads 4
 - `--threads <n>` (Barnes–Hut force threads; use 1 for deterministic single-thread baseline)
 - `--max-memory-mib <size>` (hard cap on estimated workspace bytes)
 - `--csv <path>` (write benchmark summary rows to a CSV file; includes all parsed timing/metric columns)
+- `--features simd` is a Cargo build feature (pass via `cargo run/build --features simd`) that enables optional SIMD-friendly direct-force path.
 
 ## Performance profile
 

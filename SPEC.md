@@ -70,6 +70,7 @@ Physics runtime now also supports runtime-configurable initial-condition profile
 6. Pair force model shall use:
    `f_ij = G m_i m_j (r_j - r_i) / (|r_j - r_i|^2 + ε²)^(3/2)`
    - The effective `ε` may be adapted by policy (`fixed` or `local-density`), and `--softening-policy` plus `--softening-density-scale` shall control this behavior.
+   - Direct-force force kernel includes an optional feature-gated SIMD-friendly path (`--features simd`).
 7. The system shall provide a direct-force reference implementation using the same integrator.
 8. The system shall integrate state with leapfrog/velocity Verlet (default) and optionally `rk2`.
 9. The system shall accept CLI flags including:
@@ -81,6 +82,7 @@ Physics runtime now also supports runtime-configurable initial-condition profile
       `--mass-profile`, `--mass-mean`, `--mass-stddev`, `--mass-min`, `--mass-max`, `--mass-alpha`, `--energy-sample-ratio`,
       `--seed`, `--energy-drift`, `--validate`, `--record`, `--frames-dir`, `--width`, `--height`, `--fps`, `--every-steps`, `--threads`, `--max-memory-mib`.
     - `run.ts` launcher supports `--preset fast|balanced|accurate` and resolves to tuned CLI defaults.
+    - `--features simd` enables optional SIMD-friendly direct-force computation in feature-gated builds.
     - When `--threads > 1`, Barnes–Hut force evaluation is partitioned by particle range across worker threads.
 10. The system shall emit per-run outputs:
    - phase timings (`build`, `force`, `integrate`),
@@ -177,6 +179,5 @@ Physics runtime now also supports runtime-configurable initial-condition profile
 
 ## 12) Future scope
 
-- SIMD-friendly kernels for force math.
 - Threaded force accumulation with read-only tree sharing.
 - 3D octree and optional adaptive `θ` schedule.

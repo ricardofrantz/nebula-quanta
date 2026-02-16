@@ -599,15 +599,21 @@ fn compute_accel_barnes_hut_parallel(
         return Ok(());
     }
 
+    let stack_capacity = stack.capacity().max(1);
     if thread_stacks.len() < active_threads {
-        let stack_capacity = stack.capacity().max(1);
         thread_stacks.extend((thread_stacks.len()..active_threads).map(|_| {
             Vec::with_capacity(stack_capacity)
         }));
     }
+    for thread_stack in thread_stacks.iter_mut().take(active_threads) {
+        if thread_stack.capacity() < stack_capacity {
+            thread_stack.reserve(stack_capacity - thread_stack.capacity());
+        }
+    }
 
     let chunk_base = n / active_threads;
     let chunk_extra = n % active_threads;
+    let stack_ptr = thread_stacks.as_mut_ptr();
 
     std::thread::scope(|scope| {
         let mut stack_handles = Vec::with_capacity(active_threads);
@@ -615,15 +621,11 @@ fn compute_accel_barnes_hut_parallel(
             let chunk_len = chunk_base + usize::from(thread_id < chunk_extra);
             let chunk_start = thread_id * chunk_base + thread_id.min(chunk_extra);
             let chunk_end = chunk_start + chunk_len;
+            let local_stack = unsafe { &mut *stack_ptr.add(thread_id) };
+            local_stack.clear();
 
             let chunk_ax = &mut ax[chunk_start..chunk_end];
             let chunk_ay = &mut ay[chunk_start..chunk_end];
-            let mut local_stack = if thread_id < thread_stacks.len() {
-                std::mem::take(&mut thread_stacks[thread_id])
-            } else {
-                Vec::with_capacity(stack.capacity().max(1))
-            };
-            local_stack.clear();
 
             let handle = scope.spawn(move || {
                 for offset in 0..chunk_len {
@@ -640,15 +642,14 @@ fn compute_accel_barnes_hut_parallel(
                     chunk_ax[offset] = force_x;
                     chunk_ay[offset] = force_y;
                 }
-                (thread_id, local_stack)
+                (thread_id, ())
             });
             stack_handles.push(handle);
         }
         for handle in stack_handles {
-            let (thread_id, local_stack) = handle
+            handle
                 .join()
                 .map_err(|_| "threaded Barnes-Hut force worker panicked".to_string())?;
-            thread_stacks[thread_id] = local_stack;
         }
     });
 
