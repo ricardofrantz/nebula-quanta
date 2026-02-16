@@ -18,7 +18,7 @@ bash scripts/bench_sweep_deterministic.sh \
   --seed 42 \
   --csv "$tmp_csv"
 
-if ! head -n 1 "$tmp_csv" | grep -q "^theta,threads,mode,n,steps,dt,theta_value,epsilon,seed,build_ms,force_ms,integrate_ms,total_ms,avg_step_ms,steps_per_sec,ns_per_particle_force,peak_nodes,node_capacity,node_utilization,workspace_bytes,bytes_per_particle,particle_bytes,node_bytes,stack_bytes,energy_drift_abs,energy_drift_rel$"; then
+if ! head -n 1 "$tmp_csv" | grep -q "^mode,n,steps,dt,theta,epsilon,g,threads,integrator,init,mass_profile,init_radius,init_spread,init_v_amp,init_lambda,init_center_x,init_center_y,mass_mean,mass_stddev,mass_min,mass_max,mass_alpha,seed,build_ms,force_ms,integrate_ms,total_ms,avg_step_ms,steps_per_sec,ns_per_particle_force,peak_nodes,node_capacity,node_utilization,workspace_bytes,bytes_per_particle,particle_bytes,node_bytes,stack_bytes,initial_ke,initial_pe,initial_te,initial_sampled_pairs,final_ke,final_pe,final_te,final_sampled_pairs,energy_drift_abs,energy_drift_rel,p0_x,p0_y,p0_mag,lz0,p1_x,p1_y,p1_mag,lz1,dp_x,dp_y,dp_mag,dp_lz$"; then
   echo "unexpected CSV header format"
   cat "$tmp_csv"
   exit 1

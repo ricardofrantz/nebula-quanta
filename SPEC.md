@@ -4,6 +4,7 @@
 
 Implement a high-performance, memory-efficient Barnes–Hut simulation engine centered on 2D gravity with a small code surface and a Bun orchestration layer.
 Optional deterministic frame capture is supported for high-definition offline rendering of long runs without changing simulation math.
+Physics runtime now also supports runtime-configurable initial-condition profiles, mass distributions, gravity scale, and integrator selection.
 
 ## 2) Scale target
 
@@ -19,8 +20,9 @@ Optional deterministic frame capture is supported for high-definition offline re
 - Deliver Barnes–Hut speedups with measured speed/accuracy knobs.
 - Keep behavior deterministic and auditable with a reference direct mode.
 - Keep memory traffic low through SoA layout and fixed-size, packed node storage.
-- Make per-run metrics first-class: time, structural memory occupancy, and optional validation deltas.
+- Make per-run metrics first-class: time, structural memory occupancy, energy drift and conservation telemetry.
 - Include optional deterministic PPM frame capture for reproducible post-run video encoding.
+- Expose configurable physics generation/integration knobs for repeatable experiments.
 
 ## 4) Definitions
 
@@ -56,27 +58,35 @@ Optional deterministic frame capture is supported for high-definition offline re
 ## 6) Functional requirements
 
 1. The system shall generate particle initial states from CLI/config and a seed.
-2. The system shall rebuild a bounded quadtree each step from bounds and particle positions.
-3. Each node shall store aggregate `mass` and COM.
-4. Force traversal per particle shall do one of:
+   - Initial-condition profile options: `--init`, `--init-radius`, `--init-spread`, `--init-v-amp`, `--init-lambda`, `--init-center-x`, `--init-center-y`.
+   - Mass profile options: `--mass-profile`, `--mass-mean`, `--mass-stddev`, `--mass-min`, `--mass-max`, `--mass-alpha`.
+2. The system shall expose a gravity scale `--g` used by all force and energy calculations.
+3. The system shall rebuild a bounded quadtree each step from bounds and particle positions.
+4. Each node shall store aggregate `mass` and COM.
+5. Force traversal per particle shall do one of:
    - use node approximation when `s/d < θ`,
    - else continue with child traversal.
-5. Pair force model shall use:
+6. Pair force model shall use:
    `f_ij = G m_i m_j (r_j - r_i) / (|r_j - r_i|^2 + ε²)^(3/2)`
-6. The system shall provide a direct-force reference implementation using the same integrator.
-7. The system shall integrate state with leapfrog/velocity Verlet (default).
-8. The system shall accept CLI flags including:
-    - `--mode`, `--n`, `--steps`, `--dt`, `--theta`, `--epsilon`, `--seed`, `--validate`, `--record`, `--frames-dir`, `--width`, `--height`, `--fps`, `--every-steps`, `--threads`, `--max-memory-mib`.
+7. The system shall provide a direct-force reference implementation using the same integrator.
+8. The system shall integrate state with leapfrog/velocity Verlet (default) and optionally `rk2`.
+9. The system shall accept CLI flags including:
+    - `--mode`, `--n`, `--steps`, `--dt`, `--theta`, `--epsilon`, `--g`, `--integrator`,
+      `--init`, `--init-radius`, `--init-spread`, `--init-v-amp`, `--init-lambda`, `--init-center-x`, `--init-center-y`,
+      `--mass-profile`, `--mass-mean`, `--mass-stddev`, `--mass-min`, `--mass-max`, `--mass-alpha`, `--energy-sample-ratio`,
+      `--seed`, `--energy-drift`, `--validate`, `--record`, `--frames-dir`, `--width`, `--height`, `--fps`, `--every-steps`, `--threads`, `--max-memory-mib`.
     - When `--threads > 1`, Barnes–Hut force evaluation is partitioned by particle range across worker threads.
-9. The system shall emit per-run outputs:
+10. The system shall emit per-run outputs:
    - phase timings (`build`, `force`, `integrate`),
    - optional validation metrics (RMS/max position and velocity deltas),
-   - memory usage and occupancy.
-10. The system shall allocate all major core buffers during initialization and reuse them.
-11. The system shall cap node pool capacity and return a deterministic error if a step exceeds capacity.
-12. The system shall support reproducible replay of scenarios from logged configuration.
-13. The system shall support bounded per-step output cadence controls via `--every-steps`.
-14. The optional frame recorder shall avoid allocations in hot force/build/integrate loops and use a fixed-size RGB buffer.
+   - memory usage and occupancy,
+   - optional energy and momentum telemetry (`initial_ke`, `initial_pe`, `initial_te`, `initial_sampled_pairs`, `final_ke`, `final_pe`, `final_te`, `final_sampled_pairs`,
+     `energy_drift_abs`, `energy_drift_rel`, `p0_*`, `p1_*`, `dp_*`).
+11. The system shall allocate all major core buffers during initialization and reuse them.
+12. The system shall cap node pool capacity and return a deterministic error if a step exceeds capacity.
+13. The system shall support reproducible replay of scenarios from logged configuration.
+14. The system shall support bounded per-step output cadence controls via `--every-steps`.
+15. The optional frame recorder shall avoid allocations in hot force/build/integrate loops and use a fixed-size RGB buffer.
 
 ## 7) Performance and memory requirements
 

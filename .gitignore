@@ -1,3 +1,6 @@
 /.bun
 /target
 /smoke_frames
+/captured_run
+/captured_run*/
+/captured_run*.mp4

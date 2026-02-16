@@ -10,8 +10,6 @@ use crate::{
     tree::{Node, QuadTree},
 };
 
-const G: f64 = 1.0;
-
 pub fn run_barnes_hut(
     particles: &mut ParticleSoa,
     args: &Args,
@@ -39,6 +37,9 @@ pub fn run_barnes_hut(
     let mut ay = vec![0.0; n];
     let mut traversal = Vec::with_capacity(node_capacity);
     let mut recorder = recorder;
+    let mut rk2_particles = particles.clone();
+    let mut rk2_ax = vec![0.0; n];
+    let mut rk2_ay = vec![0.0; n];
 
     let mut build_elapsed = 0.0;
     let mut force_elapsed = 0.0;
@@ -61,6 +62,7 @@ pub fn run_barnes_hut(
         &tree,
         args.theta,
         args.epsilon,
+        args.g,
         thread_count,
         &mut ax,
         &mut ay,
@@ -71,11 +73,32 @@ pub fn run_barnes_hut(
     let mut step = 0;
     while step < args.steps {
         let mut t = Instant::now();
-        for i in 0..n {
-            particles.vx[i] += 0.5 * ax[i] * args.dt;
-            particles.vy[i] += 0.5 * ay[i] * args.dt;
-            particles.x[i] += particles.vx[i] * args.dt;
-            particles.y[i] += particles.vy[i] * args.dt;
+        match args.integrator {
+            crate::config::Integrator::Leapfrog | crate::config::Integrator::Verlet => {
+                for i in 0..n {
+                    particles.vx[i] += 0.5 * ax[i] * args.dt;
+                    particles.vy[i] += 0.5 * ay[i] * args.dt;
+                    particles.x[i] += particles.vx[i] * args.dt;
+                    particles.y[i] += particles.vy[i] * args.dt;
+                }
+            }
+            crate::config::Integrator::Rk2 => {
+                integrate_rk2_step(
+                    particles,
+                    &mut tree,
+                    &mut rk2_particles,
+                    args.theta,
+                    args.epsilon,
+                    args.g,
+                    args.dt,
+                    thread_count,
+                    &ax,
+                    &ay,
+                    &mut rk2_ax,
+                    &mut rk2_ay,
+                    &mut traversal,
+                )?;
+            }
         }
         integrate_elapsed += t.elapsed().as_secs_f64() * 1000.0;
 
@@ -95,6 +118,7 @@ pub fn run_barnes_hut(
             &tree,
             args.theta,
             args.epsilon,
+            args.g,
             thread_count,
             &mut ax,
             &mut ay,
@@ -103,9 +127,13 @@ pub fn run_barnes_hut(
         force_elapsed += t.elapsed().as_secs_f64() * 1000.0;
 
         t = Instant::now();
-        for i in 0..n {
-            particles.vx[i] += 0.5 * ax[i] * args.dt;
-            particles.vy[i] += 0.5 * ay[i] * args.dt;
+        if args.integrator == crate::config::Integrator::Leapfrog
+            || args.integrator == crate::config::Integrator::Verlet
+        {
+            for i in 0..n {
+                particles.vx[i] += 0.5 * ax[i] * args.dt;
+                particles.vy[i] += 0.5 * ay[i] * args.dt;
+            }
         }
         integrate_elapsed += t.elapsed().as_secs_f64() * 1000.0;
 
@@ -123,6 +151,55 @@ pub fn run_barnes_hut(
         node_pool_bytes,
         traversal_stack_bytes,
     })
+}
+
+fn integrate_rk2_step(
+    particles: &mut ParticleSoa,
+    tree: &mut QuadTree,
+    mid_particles: &mut ParticleSoa,
+    theta: f64,
+    epsilon: f64,
+    g: f64,
+    dt: f64,
+    thread_count: usize,
+    ax: &[f64],
+    ay: &[f64],
+    mid_ax: &mut [f64],
+    mid_ay: &mut [f64],
+    traversal: &mut Vec<usize>,
+) -> Result<(), String> {
+    let n = particles.len();
+    for i in 0..n {
+        let vx_half = particles.vx[i] + 0.5 * ax[i] * dt;
+        let vy_half = particles.vy[i] + 0.5 * ay[i] * dt;
+        mid_particles.x[i] = particles.x[i] + particles.vx[i] * 0.5 * dt;
+        mid_particles.y[i] = particles.y[i] + particles.vy[i] * 0.5 * dt;
+        mid_particles.vx[i] = vx_half;
+        mid_particles.vy[i] = vy_half;
+        mid_particles.m[i] = particles.m[i];
+    }
+
+    build_tree(tree, mid_particles)?;
+
+    compute_accel_barnes_hut(
+        mid_particles,
+        tree,
+        theta,
+        epsilon,
+        g,
+        thread_count,
+        mid_ax,
+        mid_ay,
+        traversal,
+    )?;
+
+    for i in 0..particles.len() {
+        particles.x[i] += mid_particles.vx[i] * dt;
+        particles.y[i] += mid_particles.vy[i] * dt;
+        particles.vx[i] += 0.5 * (ax[i] + mid_ax[i]) * dt;
+        particles.vy[i] += 0.5 * (ay[i] + mid_ay[i]) * dt;
+    }
+    Ok(())
 }
 
 fn build_tree(tree: &mut QuadTree, particles: &ParticleSoa) -> Result<(), String> {
@@ -270,8 +347,7 @@ fn split_leaf(tree: &mut QuadTree, node_idx: usize) -> Result<(), String> {
         return Err(format!(
             "tree node capacity exceeded while splitting node {} (used={}, capacity={})",
             node_idx,
-            tree.nodes.len()
-            ,
+            tree.nodes.len(),
             tree.capacity()
         ));
     }
@@ -320,6 +396,7 @@ fn compute_accel_barnes_hut(
     tree: &QuadTree,
     theta: f64,
     epsilon: f64,
+    g: f64,
     thread_count: usize,
     ax: &mut [f64],
     ay: &mut [f64],
@@ -341,6 +418,7 @@ fn compute_accel_barnes_hut(
                 &tree.nodes,
                 theta2,
                 eps2,
+                g,
                 stack,
             );
             ax[i] = force_x;
@@ -354,6 +432,7 @@ fn compute_accel_barnes_hut(
         &tree.nodes,
         theta2,
         eps2,
+        g,
         thread_count,
         stack,
         ax,
@@ -369,6 +448,7 @@ fn compute_particle_force(
     nodes: &[Node],
     theta2: f64,
     eps2: f64,
+    g: f64,
     stack: &mut Vec<usize>,
 ) -> (f64, f64) {
     let mut force_x = 0.0;
@@ -397,7 +477,7 @@ fn compute_particle_force(
             let body = node.body_idx as usize;
             if body != i {
                 let inv_r3 = 1.0 / (dist2_soft * dist2_soft.sqrt());
-                let coeff = G * particles.m[body] * inv_r3;
+                let coeff = g * particles.m[body] * inv_r3;
                 force_x += coeff * dx;
                 force_y += coeff * dy;
             }
@@ -407,7 +487,7 @@ fn compute_particle_force(
         let size = node.size();
         if size * size <= theta2 * dist2 {
             let inv_r3 = 1.0 / (dist2_soft * dist2_soft.sqrt());
-            let coeff = G * node.mass * inv_r3;
+            let coeff = g * node.mass * inv_r3;
             force_x += coeff * dx;
             force_y += coeff * dy;
             continue;
@@ -428,6 +508,7 @@ fn compute_accel_barnes_hut_parallel(
     nodes: &[Node],
     theta2: f64,
     eps2: f64,
+    g: f64,
     thread_count: usize,
     stack: &mut Vec<usize>,
     ax: &mut [f64],
@@ -441,7 +522,7 @@ fn compute_accel_barnes_hut_parallel(
     let active_threads = thread_count.min(n);
     if active_threads <= 1 {
         for i in 0..n {
-            let (force_x, force_y) = compute_particle_force(i, particles, nodes, theta2, eps2, stack);
+            let (force_x, force_y) = compute_particle_force(i, particles, nodes, theta2, eps2, g, stack);
             ax[i] = force_x;
             ay[i] = force_y;
         }
@@ -479,6 +560,7 @@ fn compute_accel_barnes_hut_parallel(
                         nodes,
                         theta2,
                         eps2,
+                        g,
                         &mut local_stack,
                     );
                     chunk_ax[offset] = force_x;
@@ -533,4 +615,79 @@ fn traversal_stack_bytes(slots: usize, thread_count: usize) -> usize {
     slots
         .saturating_mul(active_threads)
         .saturating_mul(USIZE_BYTES)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{run_barnes_hut, preflight_node_capacity};
+    use crate::{config::Args, direct::run_direct, particle::ParticleSoa};
+
+    #[test]
+    fn rk2_integration_matches_direct_when_treated_as_direct() -> Result<(), String> {
+        let parse = |theta: &str| {
+            Args::parse_from([
+                "nq",
+                "--n",
+                "128",
+                "--steps",
+                "8",
+                "--dt",
+                "0.001",
+                "--theta",
+                theta,
+                "--epsilon",
+                "0.01",
+                "--g",
+                "0.9",
+                "--integrator",
+                "rk2",
+                "--seed",
+                "2026",
+                "--mass-profile",
+                "pow-law",
+                "--mass-alpha",
+                "2.4",
+                "--mass-min",
+                "0.5",
+                "--mass-max",
+                "1.5",
+            ])
+        };
+
+        let mut particles = ParticleSoa::random_with_profiles(
+            128,
+            2026,
+            parse("0").init,
+            parse("0").init_radius,
+            parse("0").init_spread,
+            parse("0").init_v_amp,
+            parse("0").init_lambda,
+            parse("0").init_center_x,
+            parse("0").init_center_y,
+            parse("0").mass_profile,
+            parse("0").mass_mean,
+            parse("0").mass_stddev,
+            parse("0").mass_min,
+            parse("0").mass_max,
+            parse("0").mass_alpha,
+        );
+        let mut barnes = particles.clone();
+        let mut direct = particles.clone();
+
+        let mut args = parse("0.0");
+        let node_capacity = preflight_node_capacity(args.n)?;
+        assert!(node_capacity > 0);
+
+        run_barnes_hut(&mut barnes, &args, None)?;
+        run_direct(&mut direct, &args, None)?;
+
+        for i in 0..barnes.len() {
+            assert_eq!(barnes.x[i], direct.x[i]);
+            assert_eq!(barnes.y[i], direct.y[i]);
+            assert_eq!(barnes.vx[i], direct.vx[i]);
+            assert_eq!(barnes.vy[i], direct.vy[i]);
+        }
+
+        Ok(())
+    }
 }

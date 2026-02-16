@@ -1,9 +1,8 @@
-use std::time::Instant;
 use std::mem::size_of;
+use std::time::Instant;
 
 use crate::{config::Args, frame::FrameRecorder, particle::ParticleSoa, stats::RunStats};
 
-const G: f64 = 1.0;
 const F64_BYTES: usize = size_of::<f64>();
 
 pub fn run_direct(
@@ -25,9 +24,12 @@ pub fn run_direct(
     let mut build_elapsed = 0.0;
     let mut force_elapsed = 0.0;
     let mut integrate_elapsed = 0.0;
+    let mut rk2_particles = particles.clone();
+    let mut rk2_ax = vec![0.0; n];
+    let mut rk2_ay = vec![0.0; n];
 
     let mut t = Instant::now();
-    compute_direct_accel(particles, args.epsilon, &mut ax, &mut ay);
+    compute_direct_accel_with_g(particles, args.epsilon, args.g, &mut ax, &mut ay);
     build_elapsed += t.elapsed().as_secs_f64() * 1000.0;
     if let Some(recorder) = recorder.as_deref_mut() {
         recorder.record_step(0, particles, particle_bounds(particles)?)?;
@@ -36,11 +38,28 @@ pub fn run_direct(
     let mut step = 0;
     while step < args.steps {
         t = Instant::now();
-        for i in 0..n {
-            particles.vx[i] += 0.5 * ax[i] * args.dt;
-            particles.vy[i] += 0.5 * ay[i] * args.dt;
-            particles.x[i] += particles.vx[i] * args.dt;
-            particles.y[i] += particles.vy[i] * args.dt;
+        match args.integrator {
+            crate::config::Integrator::Leapfrog | crate::config::Integrator::Verlet => {
+                for i in 0..n {
+                    particles.vx[i] += 0.5 * ax[i] * args.dt;
+                    particles.vy[i] += 0.5 * ay[i] * args.dt;
+                    particles.x[i] += particles.vx[i] * args.dt;
+                    particles.y[i] += particles.vy[i] * args.dt;
+                }
+            }
+            crate::config::Integrator::Rk2 => {
+                integrate_rk2_direct_step(
+                    particles,
+                    &mut rk2_particles,
+                    args.dt,
+                    args.g,
+                    args.epsilon,
+                    &ax,
+                    &ay,
+                    &mut rk2_ax,
+                    &mut rk2_ay,
+                );
+            }
         }
         integrate_elapsed += t.elapsed().as_secs_f64() * 1000.0;
         if let Some(recorder) = recorder.as_deref_mut() {
@@ -48,13 +67,18 @@ pub fn run_direct(
         }
 
         t = Instant::now();
-        compute_direct_accel(particles, args.epsilon, &mut ax, &mut ay);
+        compute_direct_accel_with_g(particles, args.epsilon, args.g, &mut ax, &mut ay);
         force_elapsed += t.elapsed().as_secs_f64() * 1000.0;
 
         t = Instant::now();
-        for i in 0..n {
-            particles.vx[i] += 0.5 * ax[i] * args.dt;
-            particles.vy[i] += 0.5 * ay[i] * args.dt;
+        match args.integrator {
+            crate::config::Integrator::Leapfrog | crate::config::Integrator::Verlet => {
+                for i in 0..n {
+                    particles.vx[i] += 0.5 * ax[i] * args.dt;
+                    particles.vy[i] += 0.5 * ay[i] * args.dt;
+                }
+            }
+            crate::config::Integrator::Rk2 => {}
         }
         integrate_elapsed += t.elapsed().as_secs_f64() * 1000.0;
 
@@ -75,6 +99,16 @@ pub fn run_direct(
 }
 
 pub fn compute_direct_accel(particles: &ParticleSoa, epsilon: f64, ax: &mut [f64], ay: &mut [f64]) {
+    compute_direct_accel_with_g(particles, epsilon, 1.0, ax, ay)
+}
+
+pub fn compute_direct_accel_with_g(
+    particles: &ParticleSoa,
+    epsilon: f64,
+    g: f64,
+    ax: &mut [f64],
+    ay: &mut [f64],
+) {
     let n = particles.len();
     for i in 0..n {
         ax[i] = 0.0;
@@ -93,15 +127,46 @@ pub fn compute_direct_accel(particles: &ParticleSoa, epsilon: f64, ax: &mut [f64
             }
 
             let inv_r3 = 1.0 / (dist2 * dist2.sqrt());
-
-            let coeff_i = G * particles.m[j] * inv_r3;
-            let coeff_j = G * particles.m[i] * inv_r3;
+            let coeff_i = g * particles.m[j] * inv_r3;
+            let coeff_j = g * particles.m[i] * inv_r3;
 
             ax[i] += coeff_i * dx;
             ay[i] += coeff_i * dy;
             ax[j] -= coeff_j * dx;
             ay[j] -= coeff_j * dy;
         }
+    }
+}
+
+fn integrate_rk2_direct_step(
+    particles: &mut ParticleSoa,
+    mid_particles: &mut ParticleSoa,
+    dt: f64,
+    g: f64,
+    epsilon: f64,
+    ax: &[f64],
+    ay: &[f64],
+    mid_ax: &mut [f64],
+    mid_ay: &mut [f64],
+) {
+    let n = particles.len();
+    for i in 0..n {
+        let vx_half = particles.vx[i] + 0.5 * ax[i] * dt;
+        let vy_half = particles.vy[i] + 0.5 * ay[i] * dt;
+        mid_particles.x[i] = particles.x[i] + 0.5 * particles.vx[i] * dt;
+        mid_particles.y[i] = particles.y[i] + 0.5 * particles.vy[i] * dt;
+        mid_particles.vx[i] = vx_half;
+        mid_particles.vy[i] = vy_half;
+        mid_particles.m[i] = particles.m[i];
+    }
+
+    compute_direct_accel_with_g(mid_particles, epsilon, g, mid_ax, mid_ay);
+
+    for i in 0..n {
+        particles.x[i] += mid_particles.vx[i] * dt;
+        particles.y[i] += mid_particles.vy[i] * dt;
+        particles.vx[i] += 0.5 * (ax[i] + mid_ax[i]) * dt;
+        particles.vy[i] += 0.5 * (ay[i] + mid_ay[i]) * dt;
     }
 }
 

@@ -11,6 +11,8 @@ The short executable name is `nq` and the Rust crate is `nebula-quanta`.
 
 - Rust core: compute-heavy Barnes–Hut and direct-force solvers.
 - Bun launch layer: simple scriptable local runner in `run.ts`.
+- Physics presets: gravity constant, initial-condition profiles, mass profiles, and integrator selection are built into the runtime CLI.
+- Diagnostics: optional potential sampling, full energy snapshots, and momentum/angular momentum tracking.
 
 ## Topics
 
@@ -18,11 +20,13 @@ The short executable name is `nq` and the Rust crate is `nebula-quanta`.
 - Barnes-Hut quadtree
 - Gravitational force solvers
 - SoA particle layout
+- Configurable profiles for positions, velocities, and masses
 - Performance-first CLI tooling
 - Deterministic benchmarks
 - High-rate frame capture
 - Offline MP4 rendering
 - Memory telemetry
+- Energy/momentum diagnostics
 
 ## Why the name
 
@@ -34,7 +38,7 @@ The short executable name is `nq` and the Rust crate is `nebula-quanta`.
 
 ```bash
 cargo install --path .
-nq --mode=barnes_hut --n 10000 --steps 200 --dt 0.001 --theta 0.6 --epsilon 0.01
+nq --mode=barnes_hut --n 10000 --steps 200 --dt 0.001 --theta 0.6 --epsilon 0.01 --g 1.0 --init plummer --mass-profile pow-law
 ```
 
 Local development invocation (release optimized by default):
@@ -47,6 +51,16 @@ Use a debug build when iterating quickly:
 
 ```bash
 bun run run:debug -- --mode=direct --n 1024 --steps 20 --validate --theta 0.7 --epsilon 0.01
+```
+
+Seeded profile example with fixed momentum and a higher-order integrator:
+
+```bash
+bun run nq \
+  -- --mode=barnes_hut --n 60000 --steps 150 --dt 0.0007 --theta 0.6 --epsilon 0.01 \
+  --init disk --init-radius 1.6 --init-v-amp 0.12 --init-lambda 0.8 \
+  --mass-profile lognormal --mass-mean 1.0 --mass-stddev 0.35 --mass-min 0.1 --mass-max 3.0 \
+  --integrator rk2 --seed 2026
 ```
 
 ## High-definition + high-FPS workflow
@@ -99,12 +113,33 @@ scripts/bench_sweep.sh \
   --theta 0.3,0.5,0.7,1.0 --threads 1,4 --csv bench_results.csv
 ```
 
-The CSV includes all parsed fields from the benchmark profile line, including timing, throughput, and memory telemetry.
+The CSV includes all parsed fields from the benchmark profile line, including timing, throughput, memory telemetry, energy, and momentum diagnostics.
+Current columns are:
+
+- `mode,n,steps,dt,theta,epsilon,g,threads,integrator,init,mass_profile,init_radius,init_spread,init_v_amp,init_lambda,init_center_x,init_center_y,mass_mean,mass_stddev,mass_min,mass_max,mass_alpha,seed,build_ms,force_ms,integrate_ms,total_ms,avg_step_ms,steps_per_sec,ns_per_particle_force,peak_nodes,node_capacity,node_utilization,workspace_bytes,bytes_per_particle,particle_bytes,node_bytes,stack_bytes,initial_ke,initial_pe,initial_te,initial_sampled_pairs,final_ke,final_pe,final_te,final_sampled_pairs,energy_drift_abs,energy_drift_rel,p0_x,p0_y,p0_mag,lz0,p1_x,p1_y,p1_mag,lz1,dp_x,dp_y,dp_mag,dp_lz
 
 For deterministic repeatability in CI and local handoffs, use the deterministic wrapper script (seed defaults to `42` unless overridden):
 
 ```bash
 scripts/bench_sweep_deterministic.sh --n 20000 --steps 200 --dt 0.0008 --epsilon 0.01 --seed 42 --theta 0.3,0.5,0.7,1.0 --threads 1,4 --mode barnes_hut --csv bench_results.csv
+```
+
+## Ultra-long video-first workflow
+
+For long runs where you want fixed frame-rate output budgets, capture every `N`th frame and post-encode:
+
+```bash
+bun run nq \
+  -- --mode=barnes_hut --n 120000 --steps 20000 --dt 0.0005 --theta 0.7 --epsilon 0.01 \
+  --record --frames-dir ./captured_run --width 1920 --height 1080 --fps 30 --every-steps 6 \
+  --integrator rk2 --init disk --init-radius 1.6 --init-v-amp 0.08 --mass-profile pow-law --mass-alpha 2.5 --seed 2026
+```
+
+The run should produce around `ceil(steps / every_steps)` frames.
+After capture, render with:
+
+```bash
+scripts/render_video.sh ./captured_run nebula-quanta-long.mp4 30 20 slow h264_nvenc
 ```
 
 ## CLI controls
@@ -115,9 +150,25 @@ scripts/bench_sweep_deterministic.sh --n 20000 --steps 200 --dt 0.0008 --epsilon
 - `--dt <time step>`
 - `--theta <barnes-hut opening angle>`
 - `--epsilon <softening>`
+- `--g <gravity constant multiplier>` (default: `1`)
+- `--integrator <leapfrog|verlet|rk2>` (default: `leapfrog`)
+- `--init <uniform|gaussian|plummer|disk>`
+- `--init-radius <radius>`
+- `--init-spread <spread>`
+- `--init-v-amp <velocity amplitude>`
+- `--init-lambda <shape parameter for plummer/disk>`
+- `--init-center-x <x center>`
+- `--init-center-y <y center>`
+- `--mass-profile <uniform|lognormal|gaussian|pow-law>`
+- `--mass-mean <mass mean>`
+- `--mass-stddev <mass standard deviation>`
+- `--mass-min <mass min clamp>`
+- `--mass-max <mass max clamp>`
+- `--mass-alpha <power-law exponent>`
 - `--seed <rng seed>`
 - `--validate` (run direct-force reference check; run `--mode=direct` for full O(n²) baseline behavior)
 - `--energy-drift <auto|on|off>` (default: `auto`, computes energy drift for `N <= 8192` only)
+- `--energy-sample-ratio <0..1>` (set >0 to sample potential energy on any size N)
 - `--record` (enable frame export)
 - `--frames-dir <dir>` (default `frames`)
 - `--width <pixels>`
@@ -131,7 +182,7 @@ scripts/bench_sweep_deterministic.sh --n 20000 --steps 200 --dt 0.0008 --epsilon
 ## Performance profile
 
 ```text
-mode=barnes_hut n=10000 steps=200 theta=0.6 epsilon=0.01 dt=0.001 threads=1 build_ms=12.34 force_ms=58.91 integrate_ms=4.21 total_ms=75.46 avg_step_ms=0.377 steps_per_sec=2654.7 ns_per_particle_force=294.5 peak_nodes=3801 node_capacity=40001 node_utilization=34.5 workspace_bytes=1234567 bytes_per_particle=56.0 particle_bytes=560000 node_bytes=123456 stack_bytes=16384 energy_drift_abs=1.234567 energy_drift_rel=0.000012345
+mode=barnes_hut n=10000 steps=200 theta=0.6 epsilon=0.01 g=1 dt=0.001 integrator=leapfrog init=plummer mass_profile=pow-law threads=1 build_ms=12.34 force_ms=58.91 integrate_ms=4.21 total_ms=75.46 avg_step_ms=0.377 steps_per_sec=2654.7 ns_per_particle_force=294.5 peak_nodes=3801 node_capacity=40001 node_utilization=34.5 workspace_bytes=1234567 bytes_per_particle=56.0 particle_bytes=560000 node_bytes=123456 stack_bytes=16384 initial_ke=123.456 initial_pe=-678.901 initial_te=-555.445 initial_sampled_pairs=49500000 final_ke=123.489 final_pe=-678.872 final_te=-555.383 final_sampled_pairs=49500000 energy_drift_abs=0.062 energy_drift_rel=0.000112 p0_x=1.2 p0_y=-0.4 p0_mag=1.27 lz0=2.9 p1_x=1.201 p1_y=-0.405 p1_mag=1.27 lz1=2.91 dp_x=0.001 dp_y=-0.005 dp_mag=0.005 dp_lz=0.01
 ```
 
 ## Core architecture
@@ -147,7 +198,9 @@ Simulations are deterministic by seed.
 Given the same `--seed`, `--n`, `--steps`, and runtime flags, output is repeatable.
 For runs with modest system size (`N <= 8192`), each summary includes:
 - `energy_drift_abs` and `energy_drift_rel`.
+- `initial_ke`, `initial_pe`, `initial_te`, `final_ke`, `final_pe`, `final_te`, and optional sampled pair counts.
 - `na` for larger runs where exact energy scan would add excessive O(N²) overhead.
+- Momentum and angular momentum (`p0_`, `p1_`, `dp_`) snapshots.
 
 In `--energy-drift=auto` (default), energy drift is computed for modest workloads and skipped for larger ones. Use `--energy-drift=on` to force it, or `--energy-drift=off` to suppress it.
 

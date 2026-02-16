@@ -1,7 +1,7 @@
 [package]
 name = "nebula-quanta"
 version = "1.0.0"
-edition = "2026"
+edition = "2024"
 description = "High-performance Barnes-Hut N-body simulation engine"
 license = "MIT"
 repository = "https://github.com/ricardofrantz/nebula-quanta"

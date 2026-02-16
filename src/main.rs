@@ -11,7 +11,7 @@ mod tree;
 use config::Args;
 use frame::FrameRecorder;
 use direct::run_direct;
-use particle::{total_mechanical_energy, ParticleSoa};
+use particle::{compute_energy_snapshot, total_momentum, EnergySnapshot, ParticleSoa};
 use std::path::PathBuf;
 
 fn main() {
@@ -26,12 +26,36 @@ fn main() {
         return;
     }
 
-    let mut particles = ParticleSoa::random(args.n, args.seed);
-    let initial_energy = if args.should_measure_energy_drift() {
-        Some(total_mechanical_energy(&particles, args.epsilon))
+    let mut particles = ParticleSoa::random_with_profiles(
+        args.n,
+        args.seed,
+        args.init,
+        args.init_radius,
+        args.init_spread,
+        args.init_v_amp,
+        args.init_lambda,
+        args.init_center_x,
+        args.init_center_y,
+        args.mass_profile,
+        args.mass_mean,
+        args.mass_stddev,
+        args.mass_min,
+        args.mass_max,
+        args.mass_alpha,
+    );
+    let initial_energy = if args.should_measure_energy_snapshot() {
+        compute_energy_snapshot(
+            &particles,
+            args.epsilon,
+            args.g,
+            args.energy_sample_ratio,
+            args.should_measure_energy_drift(),
+            args.seed.wrapping_add(0x9E3779B97F4A7C15),
+        )
     } else {
         None
     };
+    let initial_momentum = total_momentum(&particles);
     let validate_particles = if should_validate(&args) {
         Some(particles.clone())
     } else {
@@ -65,25 +89,63 @@ fn main() {
 
     match result {
         Ok((mode_name, stats)) => {
-            let (energy_drift_abs, energy_drift_rel) = initial_energy.map_or(
+            let final_energy = if args.should_measure_energy_snapshot() {
+                compute_energy_snapshot(
+                    &particles,
+                    args.epsilon,
+                    args.g,
+                    args.energy_sample_ratio,
+                    args.should_measure_energy_drift(),
+                    args.seed.wrapping_add(0x9E3779B97F4A7C15),
+                )
+            } else {
+                None
+            };
+            let final_momentum = total_momentum(&particles);
+            let (initial_kinetic, initial_potential, initial_total, initial_pairs) =
+                energy_format(&initial_energy);
+            let (final_kinetic, final_potential, final_total, final_pairs) =
+                energy_format(&final_energy);
+
+            let (energy_drift_abs, energy_drift_rel) = initial_energy.zip(final_energy).map_or(
                 ("na".to_string(), "na".to_string()),
-                |start| {
-                    let end = total_mechanical_energy(&particles, args.epsilon);
-                    let abs = (end - start).abs();
-                    let rel = if start.abs() > 0.0 { abs / start.abs() } else { 0.0 };
+                |(start, end)| {
+                    let abs = (end.total - start.total).abs();
+                    let rel = if start.total.abs() > 0.0 {
+                        abs / start.total.abs()
+                    } else {
+                        0.0
+                    };
                     (format!("{:.9}", abs), format!("{:.9}", rel))
                 },
             );
+            let delta_px = final_momentum.px - initial_momentum.px;
+            let delta_py = final_momentum.py - initial_momentum.py;
+            let delta_pmag = final_momentum.momentum_mag - initial_momentum.momentum_mag;
+            let delta_lz = final_momentum.angular_momentum_z - initial_momentum.angular_momentum_z;
 
             println!(
-                "mode={} n={} steps={} theta={} epsilon={} dt={} threads={} build_ms={:.3} force_ms={:.3} integrate_ms={:.3} total_ms={:.3} avg_step_ms={:.3} steps_per_sec={:.3} ns_per_particle_force={:.1} peak_nodes={} node_capacity={} node_utilization={:.2}% workspace_bytes={} bytes_per_particle={:.1} particle_bytes={} node_bytes={} stack_bytes={} energy_drift_abs={} energy_drift_rel={}",
+                "mode={} n={} steps={} theta={} epsilon={} dt={} g={} integrator={:?} threads={} init={:?} mass_profile={:?} init_radius={} init_spread={} init_v_amp={} init_lambda={} mass_mean={} mass_stddev={} mass_min={} mass_max={} mass_alpha={} build_ms={:.3} force_ms={:.3} integrate_ms={:.3} total_ms={:.3} avg_step_ms={:.3} steps_per_sec={:.3} ns_per_particle_force={:.1} peak_nodes={} node_capacity={} node_utilization={:.2}% workspace_bytes={} bytes_per_particle={:.1} particle_bytes={} node_bytes={} stack_bytes={} initial_ke={} initial_pe={} initial_te={} sampled_pairs={} final_ke={} final_pe={} final_te={} final_sampled_pairs={} energy_drift_abs={} energy_drift_rel={} p0_x={} p0_y={} p0_mag={} lz0={} p1_x={} p1_y={} p1_mag={} lz1={} dp_x={} dp_y={} dp_mag={} dp_lz={}",
                 mode_name,
                 args.n,
                 args.steps,
                 args.theta,
                 args.epsilon,
                 args.dt,
+                args.g,
+                args.integrator,
                 args.threads,
+                args.init,
+                args.mass_profile,
+                args.init_radius,
+                args.init_spread,
+                args.init_v_amp,
+                args.init_lambda,
+                args.mass_mean,
+                args.mass_stddev,
+                args.mass_min,
+                args.mass_max,
+                args.mass_alpha,
                 stats.build_ms,
                 stats.force_ms,
                 stats.integrate_ms,
@@ -99,8 +161,28 @@ fn main() {
                 stats.particle_bytes,
                 stats.node_pool_bytes,
                 stats.traversal_stack_bytes,
+                initial_kinetic,
+                initial_potential,
+                initial_total,
+                initial_pairs,
+                final_kinetic,
+                final_potential,
+                final_total,
+                final_pairs,
                 energy_drift_abs,
                 energy_drift_rel,
+                initial_momentum.px,
+                initial_momentum.py,
+                initial_momentum.momentum_mag,
+                initial_momentum.angular_momentum_z,
+                final_momentum.px,
+                final_momentum.py,
+                final_momentum.momentum_mag,
+                final_momentum.angular_momentum_z,
+                delta_px,
+                delta_py,
+                delta_pmag,
+                delta_lz,
             );
 
             if let Some(reference_particles) = validate_particles {
@@ -155,6 +237,23 @@ fn should_validate(args: &Args) -> bool {
     }
 
     true
+}
+
+fn energy_format(snapshot: &Option<EnergySnapshot>) -> (String, String, String, String) {
+    match snapshot {
+        Some(value) => (
+            format!("{:.9}", value.kinetic),
+            format!("{:.9}", value.potential),
+            format!("{:.9}", value.total),
+            format!("{}", value.sampled_pairs),
+        ),
+        None => (
+            "na".to_string(),
+            "na".to_string(),
+            "na".to_string(),
+            "na".to_string(),
+        ),
+    }
 }
 
 fn validate_against_direct(args: &Args, fast: &ParticleSoa, mut ref_particles: ParticleSoa) {
