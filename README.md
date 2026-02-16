@@ -1,20 +1,26 @@
 # Nebula Quanta (`nebula-quanta`)
 
-A fast, simple Barnes–Hut N-body simulation project in Rust with Bun orchestration.
+Performance-focused Barnes–Hut gravity simulation built in Rust, shipped through a tiny CLI called `nq`.
+
+`nq` is for fast force solves, large-N experiments, and deterministic physics baselines you can actually benchmark without hand-waving.
 
 ## About
 
-- Short CLI name: `nq`
-- Binary target: `nq`
-- Distribution shape: Rust crate (`nebula-quanta`) with thin Bun launcher (`run.ts`)
+`nq` is a deliberately compact simulation toolchain:
+
+- **One command**: `nq` is the executable name.
+- **One engine**: Rust core with predictable performance and memory behavior.
+- **One launcher**: Bun bridge (`run.ts`) for script and dev workflow convenience.
+- **One mission**: make large-N force calculations tractable while preserving validation hooks.
 
 ## Topics
 
-- Barnes-Hut
-- N-body simulation
-- Gravity force solvers
-- SoA data layout
-- Performance engineering
+- Barnes-Hut, N-body gravity
+- Quadtree acceleration (`s/d < θ`)
+- SoA layout for cache-friendly numerics
+- Deterministic simulation loops
+- Validation-by-direct-force cross-check
+- Rust CLI performance tooling
 
 ## Why the name
 
@@ -25,11 +31,11 @@ A fast, simple Barnes–Hut N-body simulation project in Rust with Bun orchestra
 
 ## Vision
 
-Compute gravitational interactions efficiently with a minimal, readable implementation of the Barnes–Hut algorithm:
-- Build a spatial tree.
-- Replace far clusters by center-of-mass approximations.
-- Tune accuracy by `θ`.
-- Keep the implementation simple first, then optimize with measured passes.
+Compute large gravitating systems fast, with a codebase that stays small enough to reason about:
+- Build one quadtree per step.
+- Collapse distant clusters using center-of-mass approximation.
+- Control accuracy with `θ` and numerical stability with `ε`.
+- Keep the implementation readable, then push the fast paths.
 
 ## Architecture
 
@@ -58,6 +64,13 @@ Compute gravitational interactions efficiently with a minimal, readable implemen
     ├── sim.rs        # force evaluation + integration + diagnostics
     └── direct.rs     # O(N^2) fallback implementation
 ```
+
+## Topics in motion
+
+- **`core`**: deterministic Rust simulation and force kernels
+- **`ops`**: startup-to-finish CLI and launcher path
+- **`perf`**: memory-safe preallocated buffers + phase timing
+- **`verify`**: optional direct-force validation channel
 
 ## Bootstrap
 
@@ -91,17 +104,23 @@ The repository now contains a working Rust core with a Bun launcher:
 - `--seed` : RNG seed for reproducibility
 - `--validate` : run direct-mode cross-check (small workloads)
 
-Example usage (after implementation):
+Example usage:
 
 ```bash
 nq --mode=barnes_hut --n 10000 --steps 200 --dt 0.001 --theta 0.6 --epsilon 0.01
 nq --mode=direct --validate --n 1024 --steps 20
 ```
 
+## Example output
+
+```text
+mode=barnes_hut n=10000 steps=200 theta=0.6 epsilon=0.01 dt=0.001 build_ms=12.34 force_ms=58.91 integrate_ms=4.21 peak_nodes=3801 node_capacity=40001
+```
+
 ## Distribution
 
 - Rust (crates): `cargo install nebula-quanta` then `nq`
-- NPM: `bun run nq` (local CLI wrapper) or install as an npm package later
+- NPM: `bun run nq` (local CLI wrapper) for rapid local scripting
 
 ## Development philosophy
 
