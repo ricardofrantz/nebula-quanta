@@ -25,10 +25,11 @@ pub fn run_barnes_hut(
 
     let n = particles.len();
     let thread_count = args.threads.max(1);
+    let active_threads = thread_count.min(n).max(1);
     let node_capacity = preflight_node_capacity(n)?;
     let particle_state_bytes = particle_state_bytes(n);
     let node_pool_bytes = node_pool_bytes(node_capacity);
-    let traversal_stack_bytes = traversal_stack_bytes(node_capacity, thread_count);
+    let traversal_stack_bytes = traversal_stack_bytes(node_capacity, active_threads);
     let workspace_bytes = particle_state_bytes + node_pool_bytes + traversal_stack_bytes;
     check_memory_budget(args, workspace_bytes)?;
 
@@ -36,6 +37,11 @@ pub fn run_barnes_hut(
     let mut ax = vec![0.0; n];
     let mut ay = vec![0.0; n];
     let mut traversal = Vec::with_capacity(node_capacity);
+    let mut traversal_stacks: Vec<Vec<usize>> = if active_threads > 1 {
+        (0..active_threads).map(|_| Vec::with_capacity(node_capacity)).collect()
+    } else {
+        Vec::new()
+    };
     let mut recorder = recorder;
     let mut rk2_particles = particles.clone();
     let mut rk2_ax = vec![0.0; n];
@@ -64,9 +70,10 @@ pub fn run_barnes_hut(
         args.epsilon,
         args.g,
         thread_count,
+        &mut traversal,
+        &mut traversal_stacks,
         &mut ax,
         &mut ay,
-        &mut traversal,
     )?;
     force_elapsed += step_start.elapsed().as_secs_f64() * 1000.0;
 
@@ -97,6 +104,7 @@ pub fn run_barnes_hut(
                     &mut rk2_ax,
                     &mut rk2_ay,
                     &mut traversal,
+                    &mut traversal_stacks,
                 )?;
             }
         }
@@ -120,9 +128,10 @@ pub fn run_barnes_hut(
             args.epsilon,
             args.g,
             thread_count,
+            &mut traversal,
+            &mut traversal_stacks,
             &mut ax,
             &mut ay,
-            &mut traversal,
         )?;
         force_elapsed += t.elapsed().as_secs_f64() * 1000.0;
 
@@ -167,6 +176,7 @@ fn integrate_rk2_step(
     mid_ax: &mut [f64],
     mid_ay: &mut [f64],
     traversal: &mut Vec<usize>,
+    traversal_stacks: &mut Vec<Vec<usize>>,
 ) -> Result<(), String> {
     let n = particles.len();
     for i in 0..n {
@@ -188,9 +198,10 @@ fn integrate_rk2_step(
         epsilon,
         g,
         thread_count,
+        traversal,
+        traversal_stacks,
         mid_ax,
         mid_ay,
-        traversal,
     )?;
 
     for i in 0..particles.len() {
@@ -398,9 +409,10 @@ fn compute_accel_barnes_hut(
     epsilon: f64,
     g: f64,
     thread_count: usize,
+    stack: &mut Vec<usize>,
+    thread_stacks: &mut Vec<Vec<usize>>,
     ax: &mut [f64],
     ay: &mut [f64],
-    stack: &mut Vec<usize>,
 ) -> Result<(), String> {
     let n = particles.len();
     if n == 0 {
@@ -435,6 +447,7 @@ fn compute_accel_barnes_hut(
         g,
         thread_count,
         stack,
+        thread_stacks,
         ax,
         ay,
     )?;
@@ -442,6 +455,7 @@ fn compute_accel_barnes_hut(
     Ok(())
 }
 
+#[inline]
 fn compute_particle_force(
     i: usize,
     particles: &ParticleSoa,
@@ -511,6 +525,7 @@ fn compute_accel_barnes_hut_parallel(
     g: f64,
     thread_count: usize,
     stack: &mut Vec<usize>,
+    thread_stacks: &mut Vec<Vec<usize>>,
     ax: &mut [f64],
     ay: &mut [f64],
 ) -> Result<(), String> {
@@ -529,30 +544,34 @@ fn compute_accel_barnes_hut_parallel(
         return Ok(());
     }
 
-    let chunk = n.div_ceil(active_threads);
-    let stack_capacity = stack.capacity().max(1);
+    if thread_stacks.len() < active_threads {
+        let stack_capacity = stack.capacity().max(1);
+        thread_stacks.extend((thread_stacks.len()..active_threads).map(|_| {
+            Vec::with_capacity(stack_capacity)
+        }));
+    }
+
+    let chunk_base = n / active_threads;
+    let chunk_extra = n % active_threads;
 
     std::thread::scope(|scope| {
-        let mut start = 0usize;
-        let mut ax_tail = ax;
-        let mut ay_tail = ay;
-        for _ in 0..active_threads {
-            let end = (start + chunk).min(n);
-            if start >= end {
-                break;
-            }
-            let len = end - start;
+        let mut stack_handles = Vec::with_capacity(active_threads);
+        for thread_id in 0..active_threads {
+            let chunk_len = chunk_base + usize::from(thread_id < chunk_extra);
+            let chunk_start = thread_id * chunk_base + thread_id.min(chunk_extra);
+            let chunk_end = chunk_start + chunk_len;
 
-            let (chunk_ax, rest_ax) = ax_tail.split_at_mut(len);
-            let (chunk_ay, rest_ay) = ay_tail.split_at_mut(len);
-            ax_tail = rest_ax;
-            ay_tail = rest_ay;
+            let chunk_ax = &mut ax[chunk_start..chunk_end];
+            let chunk_ay = &mut ay[chunk_start..chunk_end];
+            let mut local_stack = if thread_id < thread_stacks.len() {
+                std::mem::take(&mut thread_stacks[thread_id])
+            } else {
+                Vec::with_capacity(stack.capacity().max(1))
+            };
+            local_stack.clear();
 
-            let chunk_start = start;
-            scope.spawn(move || {
-                let mut local_stack: Vec<usize> = Vec::with_capacity(stack_capacity);
-
-                for offset in 0..len {
+            let handle = scope.spawn(move || {
+                for offset in 0..chunk_len {
                     let particle_idx = chunk_start + offset;
                     let (force_x, force_y) = compute_particle_force(
                         particle_idx,
@@ -566,9 +585,15 @@ fn compute_accel_barnes_hut_parallel(
                     chunk_ax[offset] = force_x;
                     chunk_ay[offset] = force_y;
                 }
+                (thread_id, local_stack)
             });
-
-            start = end;
+            stack_handles.push(handle);
+        }
+        for handle in stack_handles {
+            let (thread_id, local_stack) = handle
+                .join()
+                .map_err(|_| "threaded Barnes-Hut force worker panicked".to_string())?;
+            thread_stacks[thread_id] = local_stack;
         }
     });
 
