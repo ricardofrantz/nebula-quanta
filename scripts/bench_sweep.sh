@@ -131,12 +131,12 @@ for theta in "${THE_LIST[@]}"; do
 
       if [[ ! -s "$CSV_OUT" ]]; then
         {
-          echo "theta,threads,mode,n,steps,dt,theta_value,epsilon,seed,build_ms,force_ms,integrate_ms,total_ms,avg_step_ms,steps_per_sec,ns_per_particle_force,peak_nodes,node_capacity,node_utilization,workspace_bytes,bytes_per_particle,particle_bytes,node_bytes,stack_bytes"
+          echo "theta,threads,mode,n,steps,dt,theta_value,epsilon,seed,build_ms,force_ms,integrate_ms,total_ms,avg_step_ms,steps_per_sec,ns_per_particle_force,peak_nodes,node_capacity,node_utilization,workspace_bytes,bytes_per_particle,particle_bytes,node_bytes,stack_bytes,energy_drift_abs,energy_drift_rel"
         } > "$CSV_OUT"
       fi
 
       {
-        echo "$(field theta "$summary_line"),$(field threads "$summary_line"),$(field mode "$summary_line"),$(field n "$summary_line"),$(field steps "$summary_line"),$(field dt "$summary_line"),$(field theta "$summary_line"),$(field epsilon "$summary_line"),${SEED},$(field build_ms "$summary_line"),$(field force_ms "$summary_line"),$(field integrate_ms "$summary_line"),$(field total_ms "$summary_line"),$(field avg_step_ms "$summary_line"),$(field steps_per_sec "$summary_line"),$(field ns_per_particle_force "$summary_line"),$(field peak_nodes "$summary_line"),$(field node_capacity "$summary_line"),$(field node_utilization "$summary_line"),$(field workspace_bytes "$summary_line"),$(field bytes_per_particle "$summary_line"),$(field particle_bytes "$summary_line"),$(field node_bytes "$summary_line"),$(field stack_bytes "$summary_line")"
+        echo "$(field theta "$summary_line"),$(field threads "$summary_line"),$(field mode "$summary_line"),$(field n "$summary_line"),$(field steps "$summary_line"),$(field dt "$summary_line"),$(field theta "$summary_line"),$(field epsilon "$summary_line"),${SEED},$(field build_ms "$summary_line"),$(field force_ms "$summary_line"),$(field integrate_ms "$summary_line"),$(field total_ms "$summary_line"),$(field avg_step_ms "$summary_line"),$(field steps_per_sec "$summary_line"),$(field ns_per_particle_force "$summary_line"),$(field peak_nodes "$summary_line"),$(field node_capacity "$summary_line"),$(field node_utilization "$summary_line"),$(field workspace_bytes "$summary_line"),$(field bytes_per_particle "$summary_line"),$(field particle_bytes "$summary_line"),$(field node_bytes "$summary_line"),$(field stack_bytes "$summary_line"),$(field energy_drift_abs "$summary_line"),$(field energy_drift_rel "$summary_line")"
       } >> "$CSV_OUT"
     fi
 

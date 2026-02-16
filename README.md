@@ -130,7 +130,7 @@ scripts/bench_sweep_deterministic.sh --n 20000 --steps 200 --dt 0.0008 --epsilon
 ## Performance profile
 
 ```text
-mode=barnes_hut n=10000 steps=200 theta=0.6 epsilon=0.01 dt=0.001 threads=1 build_ms=12.34 force_ms=58.91 integrate_ms=4.21 total_ms=75.46 avg_step_ms=0.377 steps_per_sec=2654.7 ns_per_particle_force=294.5 peak_nodes=3801 node_capacity=40001 node_utilization=34.5 workspace_bytes=1234567 bytes_per_particle=56.0 particle_bytes=560000 node_bytes=123456 stack_bytes=16384
+mode=barnes_hut n=10000 steps=200 theta=0.6 epsilon=0.01 dt=0.001 threads=1 build_ms=12.34 force_ms=58.91 integrate_ms=4.21 total_ms=75.46 avg_step_ms=0.377 steps_per_sec=2654.7 ns_per_particle_force=294.5 peak_nodes=3801 node_capacity=40001 node_utilization=34.5 workspace_bytes=1234567 bytes_per_particle=56.0 particle_bytes=560000 node_bytes=123456 stack_bytes=16384 energy_drift_abs=1.234567 energy_drift_rel=0.000012345
 ```
 
 ## Core architecture
@@ -144,6 +144,9 @@ mode=barnes_hut n=10000 steps=200 theta=0.6 epsilon=0.01 dt=0.001 threads=1 buil
 
 Simulations are deterministic by seed.
 Given the same `--seed`, `--n`, `--steps`, and runtime flags, output is repeatable.
+For runs with modest system size (`N <= 8192`), each summary includes:
+- `energy_drift_abs` and `energy_drift_rel`.
+- `na` for larger runs where exact energy scan would add excessive O(N²) overhead.
 
 ## Validation
 

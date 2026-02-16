@@ -18,7 +18,7 @@ bash scripts/bench_sweep_deterministic.sh \
   --seed 42 \
   --csv "$tmp_csv"
 
-if ! head -n 1 "$tmp_csv" | grep -q "^theta,threads,mode,n,steps,dt,theta_value,epsilon,seed,build_ms,force_ms,integrate_ms,total_ms,avg_step_ms,steps_per_sec,ns_per_particle_force,peak_nodes,node_capacity,node_utilization,workspace_bytes,bytes_per_particle,particle_bytes,node_bytes,stack_bytes$"; then
+if ! head -n 1 "$tmp_csv" | grep -q "^theta,threads,mode,n,steps,dt,theta_value,epsilon,seed,build_ms,force_ms,integrate_ms,total_ms,avg_step_ms,steps_per_sec,ns_per_particle_force,peak_nodes,node_capacity,node_utilization,workspace_bytes,bytes_per_particle,particle_bytes,node_bytes,stack_bytes,energy_drift_abs,energy_drift_rel$"; then
   echo "unexpected CSV header format"
   cat "$tmp_csv"
   exit 1

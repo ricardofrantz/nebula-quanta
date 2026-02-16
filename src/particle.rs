@@ -50,3 +50,36 @@ impl ParticleSoa {
         self.x.len()
     }
 }
+
+pub fn total_mechanical_energy(particles: &ParticleSoa, epsilon: f64) -> f64 {
+    total_kinetic_energy(particles) + total_potential_energy(particles, epsilon)
+}
+
+fn total_kinetic_energy(particles: &ParticleSoa) -> f64 {
+    let mut total = 0.0;
+    for i in 0..particles.len() {
+        let speed2 = particles.vx[i] * particles.vx[i] + particles.vy[i] * particles.vy[i];
+        total += 0.5 * particles.m[i] * speed2;
+    }
+    total
+}
+
+fn total_potential_energy(particles: &ParticleSoa, epsilon: f64) -> f64 {
+    let mut total = 0.0;
+    let n = particles.len();
+    let eps2 = epsilon * epsilon;
+
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let dx = particles.x[i] - particles.x[j];
+            let dy = particles.y[i] - particles.y[j];
+            let dist = (dx * dx + dy * dy + eps2).sqrt();
+            if dist == 0.0 {
+                continue;
+            }
+            total -= particles.m[i] * particles.m[j] / dist;
+        }
+    }
+
+    total
+}

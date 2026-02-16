@@ -11,8 +11,10 @@ mod tree;
 use config::Args;
 use frame::FrameRecorder;
 use direct::run_direct;
-use particle::ParticleSoa;
+use particle::{total_mechanical_energy, ParticleSoa};
 use std::path::PathBuf;
+
+const ENERGY_DRIFT_PARTICLE_LIMIT: usize = 8_192;
 
 fn main() {
     let args = Args::parse();
@@ -27,6 +29,11 @@ fn main() {
     }
 
     let mut particles = ParticleSoa::random(args.n, args.seed);
+    let initial_energy = if args.n <= ENERGY_DRIFT_PARTICLE_LIMIT {
+        Some(total_mechanical_energy(&particles, args.epsilon))
+    } else {
+        None
+    };
     let validate_particles = if should_validate(&args) {
         Some(particles.clone())
     } else {
@@ -60,8 +67,18 @@ fn main() {
 
     match result {
         Ok((mode_name, stats)) => {
+            let (energy_drift_abs, energy_drift_rel) = initial_energy.map_or(
+                ("na".to_string(), "na".to_string()),
+                |start| {
+                    let end = total_mechanical_energy(&particles, args.epsilon);
+                    let abs = (end - start).abs();
+                    let rel = if start.abs() > 0.0 { abs / start.abs() } else { 0.0 };
+                    (format!("{:.9}", abs), format!("{:.9}", rel))
+                },
+            );
+
             println!(
-                "mode={} n={} steps={} theta={} epsilon={} dt={} threads={} build_ms={:.3} force_ms={:.3} integrate_ms={:.3} total_ms={:.3} avg_step_ms={:.3} steps_per_sec={:.3} ns_per_particle_force={:.1} peak_nodes={} node_capacity={} node_utilization={:.2}% workspace_bytes={} bytes_per_particle={:.1} particle_bytes={} node_bytes={} stack_bytes={}",
+                "mode={} n={} steps={} theta={} epsilon={} dt={} threads={} build_ms={:.3} force_ms={:.3} integrate_ms={:.3} total_ms={:.3} avg_step_ms={:.3} steps_per_sec={:.3} ns_per_particle_force={:.1} peak_nodes={} node_capacity={} node_utilization={:.2}% workspace_bytes={} bytes_per_particle={:.1} particle_bytes={} node_bytes={} stack_bytes={} energy_drift_abs={} energy_drift_rel={}",
                 mode_name,
                 args.n,
                 args.steps,
@@ -84,6 +101,8 @@ fn main() {
                 stats.particle_bytes,
                 stats.node_pool_bytes,
                 stats.traversal_stack_bytes,
+                energy_drift_abs,
+                energy_drift_rel,
             );
 
             if let Some(reference_particles) = validate_particles {
