@@ -133,6 +133,38 @@ impl ParticleSoa {
     }
 }
 
+pub fn particle_bounds(particles: &ParticleSoa) -> Result<(f64, f64, f64, f64), String> {
+    let n = particles.len();
+    if n == 0 {
+        return Err("no particles available for frame bounds".to_string());
+    }
+
+    let mut x_min = particles.x[0];
+    let mut x_max = particles.x[0];
+    let mut y_min = particles.y[0];
+    let mut y_max = particles.y[0];
+
+    for i in 1..n {
+        let x = particles.x[i];
+        let y = particles.y[i];
+        if x < x_min {
+            x_min = x;
+        }
+        if x > x_max {
+            x_max = x;
+        }
+        if y < y_min {
+            y_min = y;
+        }
+        if y > y_max {
+            y_max = y;
+        }
+    }
+
+    let pad_x = ((x_max - x_min).abs() + (y_max - y_min).abs()) * 1e-12 + 1.0e-6;
+    Ok((x_min - pad_x, x_max + pad_x, y_min - pad_x, y_max + pad_x))
+}
+
 pub fn total_mechanical_energy(particles: &ParticleSoa, epsilon: f64) -> f64 {
     total_mechanical_energy_with_g(particles, epsilon, 1.0)
 }
@@ -356,7 +388,7 @@ fn sample_initial_position(
             let angle = rng.random_range(0.0..(2.0 * PI));
             (center_x + r * angle.cos(), center_y + r * angle.sin())
         }
-        InitProfile::Disk => {
+        InitProfile::Disk | InitProfile::RotatingDisk | InitProfile::KeplerianDisk => {
             let t = rng.random_range(f64::MIN_POSITIVE..(1.0 - f64::EPSILON));
             let r = (radius * (-lambda * t.ln()).abs()).min(radius * 6.0);
             let angle = rng.random_range(0.0..(2.0 * PI));
@@ -409,6 +441,24 @@ fn sample_initial_velocity(
             let dy = y - center_y;
             let r = (dx * dx + dy * dy).sqrt().max(1e-12);
             let speed = amp / (1.0 + init_lambda * r / (radius.abs().max(1e-12)).max(1.0));
+            let angle = dy.atan2(dx);
+            (-speed * angle.sin() + jitter_x, speed * angle.cos() + jitter_y)
+        }
+        InitProfile::RotatingDisk => {
+            let dx = x - center_x;
+            let dy = y - center_y;
+            let r = (dx * dx + dy * dy).sqrt().max(1e-12);
+            let speed = amp
+                * (1.0 + init_lambda * (1.0 / (1.0 + (r / (radius.abs().max(1e-12)).max(1e-12)).sqrt()));
+            let angle = dy.atan2(dx);
+            (-speed * angle.sin() + jitter_x, speed * angle.cos() + jitter_y)
+        }
+        InitProfile::KeplerianDisk => {
+            let dx = x - center_x;
+            let dy = y - center_y;
+            let r = (dx * dx + dy * dy).sqrt().max(1e-12);
+            let scale = (radius.abs().max(1e-12)).max(1e-12);
+            let speed = amp / (1.0 + (r / scale).sqrt());
             let angle = dy.atan2(dx);
             (-speed * angle.sin() + jitter_x, speed * angle.cos() + jitter_y)
         }

@@ -54,6 +54,7 @@ Physics runtime now also supports runtime-configurable initial-condition profile
 - GPU compute implementation.
 - 3D octree implementation.
 - Distributed execution.
+- `--dim=3` validation/dispatch is intentionally disabled in this phase.
 
 ## 6) Functional requirements
 
@@ -68,13 +69,18 @@ Physics runtime now also supports runtime-configurable initial-condition profile
    - else continue with child traversal.
 6. Pair force model shall use:
    `f_ij = G m_i m_j (r_j - r_i) / (|r_j - r_i|^2 + ε²)^(3/2)`
+   - The effective `ε` may be adapted by policy (`fixed` or `local-density`), and `--softening-policy` plus `--softening-density-scale` shall control this behavior.
 7. The system shall provide a direct-force reference implementation using the same integrator.
 8. The system shall integrate state with leapfrog/velocity Verlet (default) and optionally `rk2`.
 9. The system shall accept CLI flags including:
-    - `--mode`, `--n`, `--steps`, `--dt`, `--theta`, `--epsilon`, `--g`, `--integrator`,
-      `--init`, `--init-radius`, `--init-spread`, `--init-v-amp`, `--init-lambda`, `--init-center-x`, `--init-center-y`,
+- `--mode`, `--n`, `--steps`, `--dt`, `--theta`, `--epsilon`, `--g`, `--integrator`,
+      `--init`, `--init-radius`, `--init-spread`, `--init-v-amp`, `--init-lambda`, `--init-center-x`, `--init-center-y`
+      (`rotating-disk`, `keplerian-disk` included),
+      `--dim` (`2` supported; `3` currently reserved),
+      `--theta-policy`, `--theta-density-scale`, `--softening-policy`, `--softening-density-scale`,
       `--mass-profile`, `--mass-mean`, `--mass-stddev`, `--mass-min`, `--mass-max`, `--mass-alpha`, `--energy-sample-ratio`,
       `--seed`, `--energy-drift`, `--validate`, `--record`, `--frames-dir`, `--width`, `--height`, `--fps`, `--every-steps`, `--threads`, `--max-memory-mib`.
+    - `run.ts` launcher supports `--preset fast|balanced|accurate` and resolves to tuned CLI defaults.
     - When `--threads > 1`, Barnes–Hut force evaluation is partitioned by particle range across worker threads.
 10. The system shall emit per-run outputs:
    - phase timings (`build`, `force`, `integrate`),

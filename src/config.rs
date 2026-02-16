@@ -12,6 +12,18 @@ pub struct Args {
     /// Barnes–Hut opening angle. Use theta <= 0 to run the direct-force baseline.
     #[arg(long, default_value_t = 0.7)]
     pub theta: f64,
+    /// Spatial opening-angle control policy for Barnes–Hut.
+    #[arg(long, default_value = "fixed", value_enum)]
+    pub theta_policy: ThetaPolicy,
+    /// Density scaling factor for `theta` local-density adaptation. Larger values reduce adaptive effect.
+    #[arg(long, default_value_t = 128.0)]
+    pub theta_density_scale: f64,
+    /// Softening-length policy for near-field interaction regularization.
+    #[arg(long, default_value = "fixed", value_enum)]
+    pub softening_policy: SofteningPolicy,
+    /// Density scaling factor for local-density softening adaptation. Larger values reduce adaptive effect.
+    #[arg(long, default_value_t = 128.0)]
+    pub softening_density_scale: f64,
     /// Softening term used by both Barnes–Hut and direct-force solvers.
     #[arg(long, default_value_t = 0.01)]
     pub epsilon: f64,
@@ -66,6 +78,9 @@ pub struct Args {
     /// Energy drift calculation mode: `auto` (default, only for N <= 8192), `on`, `off`.
     #[arg(long, value_enum, default_value = "auto")]
     pub energy_drift: EnergyDriftMode,
+    /// Problem dimension (2D supported; 3D is a planned expansion).
+    #[arg(long, default_value = "2", value_enum)]
+    pub dim: Dimensionality,
     /// Solver mode (`barnes_hut` or `direct`; aliases `barneshut`/`bh` are accepted).
     /// Default is Barnes–Hut for large-scale runs; `direct` retains the O(n²) baseline.
     #[arg(long, default_value = "barnes_hut")]
@@ -114,11 +129,52 @@ pub enum Integrator {
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Dimensionality {
+    /// 2D execution (x-y plane).
+    #[value(name = "2")]
+    Two,
+    /// 3D execution is reserved (not yet implemented).
+    #[value(name = "3")]
+    Three,
+}
+
+impl Dimensionality {
+    pub const fn as_u8(&self) -> u8 {
+        match self {
+            Self::Two => 2,
+            Self::Three => 3,
+        }
+    }
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ThetaPolicy {
+    /// Use a fixed global theta value for all steps.
+    Fixed,
+    /// Reduce theta when particle density rises (bounds-derived heuristic).
+    #[value(name = "local-density")]
+    LocalDensity,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SofteningPolicy {
+    /// Use a fixed global softening length for all steps.
+    Fixed,
+    /// Increase softening with density to reduce singularity sensitivity in clustered states.
+    #[value(name = "local-density")]
+    LocalDensity,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InitProfile {
     Uniform,
     Gaussian,
     Plummer,
     Disk,
+    #[value(name = "rotating-disk")]
+    RotatingDisk,
+    #[value(name = "keplerian-disk")]
+    KeplerianDisk,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
@@ -131,6 +187,93 @@ pub enum MassProfile {
 }
 
 impl Args {
+    /// Resolve a step-specific Barnes–Hut opening angle from policy and current bounds.
+    /// Local-density policy adapts theta downward as particle density rises.
+    pub fn theta_for_step(
+        &self,
+        _step: usize,
+        particle_count: usize,
+        bounds: Option<(f64, f64, f64, f64)>,
+    ) -> f64 {
+        if self.theta <= 0.0 {
+            return self.theta;
+        }
+
+        match self.theta_policy {
+            ThetaPolicy::Fixed => self.theta,
+            ThetaPolicy::LocalDensity => {
+                let Some((x_min, x_max, y_min, y_max)) = bounds else {
+                    return self.theta;
+                };
+
+                let span_x = (x_max - x_min).abs();
+                let span_y = (y_max - y_min).abs();
+                let area = span_x * span_y;
+
+                if !area.is_finite() || area <= 0.0 {
+                    return self.theta;
+                }
+
+                let density = (particle_count as f64) / area;
+                if !density.is_finite() || density <= 0.0 {
+                    return self.theta;
+                }
+
+                let scale = self.theta_density_scale.max(f64::EPSILON);
+                let factor = (density / scale).ln_1p();
+                if !factor.is_finite() {
+                    return self.theta;
+                }
+
+                let min_theta = (self.theta * 0.05).max(1.0e-4);
+                (self.theta / (1.0 + factor)).clamp(min_theta, self.theta)
+            }
+        }
+    }
+
+    /// Resolve a step-specific softening length from policy and current bounds.
+    /// Local-density policy increases softening in dense systems.
+    pub fn epsilon_for_step(
+        &self,
+        _step: usize,
+        particle_count: usize,
+        bounds: Option<(f64, f64, f64, f64)>,
+    ) -> f64 {
+        if !self.epsilon.is_finite() || self.epsilon <= 0.0 {
+            return self.epsilon;
+        }
+
+        match self.softening_policy {
+            SofteningPolicy::Fixed => self.epsilon,
+            SofteningPolicy::LocalDensity => {
+                let Some((x_min, x_max, y_min, y_max)) = bounds else {
+                    return self.epsilon;
+                };
+
+                let span_x = (x_max - x_min).abs();
+                let span_y = (y_max - y_min).abs();
+                let area = span_x * span_y;
+                if !area.is_finite() || area <= 0.0 {
+                    return self.epsilon;
+                }
+
+                let density = (particle_count as f64) / area;
+                if !density.is_finite() || density <= 0.0 {
+                    return self.epsilon;
+                }
+
+                let scale = self.softening_density_scale.max(f64::EPSILON);
+                let factor = (density / scale).ln_1p();
+                if !factor.is_finite() {
+                    return self.epsilon;
+                }
+
+                let factor = factor.clamp(0.0, 8.0);
+                self.epsilon * (1.0 + factor)
+            }
+        }
+    }
+
     pub fn should_measure_energy_drift(&self) -> bool {
         const AUTO_PARTICLE_LIMIT: usize = 8192;
         match self.energy_drift {
@@ -216,5 +359,85 @@ mod tests {
         ]);
         assert_eq!(with_alias.init, InitProfile::Disk);
         assert_eq!(with_alias.mass_profile, MassProfile::Lognormal);
+    }
+
+    #[test]
+    fn parse_dim_and_adaptive_theta_flags() {
+        let args = Args::parse_from([
+            "nq",
+            "--dim",
+            "3",
+            "--theta",
+            "0.7",
+            "--theta-policy",
+            "local-density",
+            "--theta-density-scale",
+            "64.0",
+        ]);
+
+        assert_eq!(args.dim, Dimensionality::Three);
+        assert_eq!(args.theta_policy, ThetaPolicy::LocalDensity);
+        assert!((args.theta_density_scale - 64.0).abs() < f64::EPSILON);
+        let adaptive_theta = args.theta_for_step(
+            0,
+            1000,
+            Some((-1.0, 1.0, -2.0, 2.0)),
+        );
+        assert!(adaptive_theta < 0.7);
+        assert!(adaptive_theta >= (0.7 * 0.05).max(1.0e-4));
+        assert_eq!(args.theta_for_step(0, 1000, None), 0.7);
+
+        let fixed_args = Args::parse_from(["nq", "--theta-policy", "fixed", "--theta", "0.6"]);
+        assert_eq!(
+            fixed_args.theta_for_step(0, 1000, Some((-1.0, 1.0, -2.0, 2.0)),
+            0.6
+        );
+    }
+
+    #[test]
+    fn parse_softening_policy_and_density_scale() {
+        let adaptive_args = Args::parse_from([
+            "nq",
+            "--epsilon",
+            "0.01",
+            "--softening-policy",
+            "local-density",
+            "--softening-density-scale",
+            "64.0",
+        ]);
+
+        assert_eq!(adaptive_args.softening_policy, SofteningPolicy::LocalDensity);
+        assert!((adaptive_args.softening_density_scale - 64.0).abs() < f64::EPSILON);
+        let adaptive_epsilon = adaptive_args.epsilon_for_step(
+            0,
+            1000,
+            Some((-1.0, 1.0, -1.0, 1.0)),
+        );
+        assert!(adaptive_epsilon > adaptive_args.epsilon);
+
+        let fixed_args = Args::parse_from([
+            "nq",
+            "--epsilon",
+            "0.02",
+            "--softening-policy",
+            "fixed",
+        ]);
+        assert_eq!(
+            fixed_args.epsilon_for_step(
+                0,
+                1000,
+                Some((-1.0, 1.0, -1.0, 1.0)),
+            ),
+            0.02
+        );
+    }
+
+    #[test]
+    fn parse_additional_profile_variants() {
+        let disk_args = Args::parse_from(["nq", "--init", "rotating-disk", "--n", "32"]);
+        let keplerian_args = Args::parse_from(["nq", "--init", "keplerian-disk", "--n", "32"]);
+
+        assert_eq!(disk_args.init, InitProfile::RotatingDisk);
+        assert_eq!(keplerian_args.init, InitProfile::KeplerianDisk);
     }
 }

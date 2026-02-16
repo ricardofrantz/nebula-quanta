@@ -1,7 +1,12 @@
 use std::mem::size_of;
 use std::time::Instant;
 
-use crate::{config::Args, frame::FrameRecorder, particle::ParticleSoa, stats::RunStats};
+use crate::{
+    config::Args,
+    frame::FrameRecorder,
+    particle::{particle_bounds, ParticleSoa},
+    stats::RunStats,
+};
 
 const F64_BYTES: usize = size_of::<f64>();
 
@@ -27,9 +32,10 @@ pub fn run_direct(
     let mut rk2_particles = particles.clone();
     let mut rk2_ax = vec![0.0; n];
     let mut rk2_ay = vec![0.0; n];
+    let mut epsilon = args.epsilon_for_step(0, n, particle_bounds(particles).ok());
 
     let mut t = Instant::now();
-    compute_direct_accel_with_g(particles, args.epsilon, args.g, &mut ax, &mut ay);
+    compute_direct_accel_with_g(particles, epsilon, args.g, &mut ax, &mut ay);
     build_elapsed += t.elapsed().as_secs_f64() * 1000.0;
     if let Some(recorder) = recorder.as_deref_mut() {
         recorder.record_step(0, particles, particle_bounds(particles)?)?;
@@ -53,7 +59,7 @@ pub fn run_direct(
                     &mut rk2_particles,
                     args.dt,
                     args.g,
-                    args.epsilon,
+                    epsilon,
                     &ax,
                     &ay,
                     &mut rk2_ax,
@@ -67,7 +73,12 @@ pub fn run_direct(
         }
 
         t = Instant::now();
-        compute_direct_accel_with_g(particles, args.epsilon, args.g, &mut ax, &mut ay);
+        epsilon = args.epsilon_for_step(
+            step + 1,
+            n,
+            particle_bounds(particles).ok(),
+        );
+        compute_direct_accel_with_g(particles, epsilon, args.g, &mut ax, &mut ay);
         force_elapsed += t.elapsed().as_secs_f64() * 1000.0;
 
         t = Instant::now();
@@ -189,36 +200,4 @@ fn check_memory_budget(args: &Args, workspace_bytes: usize) -> Result<(), String
     }
 
     Ok(())
-}
-
-fn particle_bounds(particles: &ParticleSoa) -> Result<(f64, f64, f64, f64), String> {
-    let n = particles.len();
-    if n == 0 {
-        return Err("no particles available for frame bounds".to_string());
-    }
-
-    let mut x_min = particles.x[0];
-    let mut x_max = particles.x[0];
-    let mut y_min = particles.y[0];
-    let mut y_max = particles.y[0];
-
-    for i in 1..n {
-        let x = particles.x[i];
-        let y = particles.y[i];
-        if x < x_min {
-            x_min = x;
-        }
-        if x > x_max {
-            x_max = x;
-        }
-        if y < y_min {
-            y_min = y;
-        }
-        if y > y_max {
-            y_max = y;
-        }
-    }
-
-    let pad_x = ((x_max - x_min).abs() + (y_max - y_min).abs()) * 1e-12 + 1.0e-6;
-    Ok((x_min - pad_x, x_max + pad_x, y_min - pad_x, y_max + pad_x))
 }

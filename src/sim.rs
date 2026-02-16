@@ -3,12 +3,62 @@ use std::time::Instant;
 
 use crate::{
     config::Args,
-    direct::run_direct as run_direct_reference,
+    direct::{compute_direct_accel_with_g, run_direct as run_direct_reference},
     frame::FrameRecorder,
-    particle::ParticleSoa,
+    particle::{particle_bounds, ParticleSoa},
     stats::RunStats,
     tree::{Node, QuadTree},
 };
+
+pub fn compute_barnes_hut_accel_snapshot(
+    particles: &ParticleSoa,
+    args: &Args,
+) -> Result<(Vec<f64>, Vec<f64>), String> {
+    let n = particles.len();
+    if n == 0 {
+        return Ok((Vec::new(), Vec::new()));
+    }
+
+    if args.theta <= 0.0 {
+        let mut direct_ax = vec![0.0; n];
+        let mut direct_ay = vec![0.0; n];
+        let epsilon = args.epsilon_for_step(0, n, particle_bounds(particles).ok());
+        compute_direct_accel_with_g(particles, epsilon, args.g, &mut direct_ax, &mut direct_ay);
+        return Ok((direct_ax, direct_ay));
+    }
+
+    let thread_count = args.threads.max(1);
+    let active_threads = thread_count.min(n).max(1);
+    let node_capacity = preflight_node_capacity(n)?;
+    let mut tree = QuadTree::with_capacity(node_capacity);
+    let mut ax = vec![0.0; n];
+    let mut ay = vec![0.0; n];
+    let mut epsilon = args.epsilon_for_step(0, n, None);
+    let mut stack = Vec::with_capacity(node_capacity);
+    let mut traversal_stacks: Vec<Vec<usize>> = if active_threads > 1 {
+        (0..active_threads).map(|_| Vec::with_capacity(node_capacity)).collect()
+    } else {
+        Vec::new()
+    };
+
+    build_tree(&mut tree, particles)?;
+    let effective_theta = args.theta_for_step(0, n, tree.root_bounds());
+    epsilon = args.epsilon_for_step(0, n, tree.root_bounds());
+    compute_accel_barnes_hut(
+        particles,
+        &tree,
+        effective_theta,
+        epsilon,
+        args.g,
+        active_threads,
+        &mut stack,
+        &mut traversal_stacks,
+        &mut ax,
+        &mut ay,
+    )?;
+
+    Ok((ax, ay))
+}
 
 pub fn run_barnes_hut(
     particles: &mut ParticleSoa,
@@ -51,11 +101,15 @@ pub fn run_barnes_hut(
     let mut force_elapsed = 0.0;
     let mut integrate_elapsed = 0.0;
     let mut peak_node_count = 0usize;
+    let mut theta = args.theta_for_step(0, n, None);
+    let mut epsilon = args.epsilon_for_step(0, n, None);
 
     let mut step_start = Instant::now();
     build_tree(&mut tree, particles)?;
     peak_node_count = peak_node_count.max(tree.nodes.len());
     build_elapsed += step_start.elapsed().as_secs_f64() * 1000.0;
+    theta = args.theta_for_step(0, n, tree.root_bounds());
+    epsilon = args.epsilon_for_step(0, n, tree.root_bounds());
     if let Some(recorder) = recorder.as_deref_mut() {
         if let Some(bounds) = tree.root_bounds() {
             recorder.record_step(0, particles, bounds)?;
@@ -66,8 +120,8 @@ pub fn run_barnes_hut(
     compute_accel_barnes_hut(
         particles,
         &tree,
-        args.theta,
-        args.epsilon,
+        theta,
+        epsilon,
         args.g,
         active_threads,
         &mut traversal,
@@ -94,8 +148,8 @@ pub fn run_barnes_hut(
                     particles,
                     &mut tree,
                     &mut rk2_particles,
-                    args.theta,
-                    args.epsilon,
+                    theta,
+                    epsilon,
                     args.g,
                     args.dt,
                     active_threads,
@@ -114,6 +168,8 @@ pub fn run_barnes_hut(
         build_tree(&mut tree, particles)?;
         peak_node_count = peak_node_count.max(tree.nodes.len());
         build_elapsed += t.elapsed().as_secs_f64() * 1000.0;
+        theta = args.theta_for_step(step + 1, n, tree.root_bounds());
+        epsilon = args.epsilon_for_step(step + 1, n, tree.root_bounds());
         if let Some(recorder) = recorder.as_deref_mut() {
             if let Some(bounds) = tree.root_bounds() {
                 recorder.record_step(step + 1, particles, bounds)?;
@@ -124,8 +180,8 @@ pub fn run_barnes_hut(
         compute_accel_barnes_hut(
             particles,
             &tree,
-            args.theta,
-            args.epsilon,
+            theta,
+            epsilon,
             args.g,
             active_threads,
             &mut traversal,
