@@ -13,6 +13,7 @@
     "start": "bun run nq",
     "run": "bun run nq",
     "bench": "bash scripts/bench_sweep.sh",
+    "bench:smoke": "bash scripts/smoke_bench_sweep.sh",
     "run:debug": "bun run run.ts --debug",
     "render": "bash scripts/render_video.sh"
   }
