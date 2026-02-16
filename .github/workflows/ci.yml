@@ -1,0 +1,32 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  docs-sanity:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify required repository files
+        run: |
+          required=(README.md SPEC.md plan.md plan_2026-02-16.md)
+          for file in "${required[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "::error file=$file::Required file missing: $file"
+              exit 1
+            fi
+          done
+          echo "Required files present."
+
+      - name: Verify project name mention in README
+        run: |
+          if ! grep -qi "nebula-quanta" README.md; then
+            echo "::error file=README.md::README should reference the repo name nebula-quanta"
+            exit 1
+          fi
+          echo "README repo name check passed."
