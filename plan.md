@@ -164,7 +164,7 @@ Implement a max-performance, memory-frugal Barnes–Hut engine with a clear spee
 
 ## Milestone 5a — Video throughput hardening
 - Add a short render helper command section in `README.md` for high-FPS exports.
-- Include 60/120 fps and 4K profiles with explicit `ffmpeg` presets and codec options.
+- Include 30/60 fps profiles with explicit `ffmpeg` presets and codec options.
 - Keep frame export outside benchmark hot path; support recording at `N=0` overhead when disabled.
 
 ## Milestone 6 — Optional next phase
