@@ -101,16 +101,22 @@ scripts/bench_sweep.sh \
 
 The CSV includes all parsed fields from the benchmark profile line, including timing, throughput, and memory telemetry.
 
+For deterministic repeatability in CI and local handoffs, use the deterministic wrapper script (seed defaults to `42` unless overridden):
+
+```bash
+scripts/bench_sweep_deterministic.sh --n 20000 --steps 200 --dt 0.0008 --epsilon 0.01 --seed 42 --theta 0.3,0.5,0.7,1.0 --threads 1,4 --mode barnes_hut --csv bench_results.csv
+```
+
 ## CLI controls
 
-- `--mode barnes_hut|direct`
+- `--mode <barnes_hut|direct>` (default: `barnes_hut`; aliases: `bh`, `barneshut`)
 - `--n <particle count>`
 - `--steps <integration steps>`
 - `--dt <time step>`
 - `--theta <barnes-hut opening angle>`
 - `--epsilon <softening>`
 - `--seed <rng seed>`
-- `--validate` (run direct-force reference check)
+- `--validate` (run direct-force reference check; run `--mode=direct` for full O(n²) baseline behavior)
 - `--record` (enable frame export)
 - `--frames-dir <dir>` (default `frames`)
 - `--width <pixels>`

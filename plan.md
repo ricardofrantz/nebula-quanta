@@ -40,6 +40,7 @@ Implement a max-performance, memory-frugal Barnes–Hut engine with a clear spee
 - ✅ Big-run execution path now defaults to optimized release builds (`run.ts` uses `--release`, with `--debug` override).
 - ✅ Benchmark sweep helper added (`scripts/bench_sweep.sh`) and `bun run bench`.
 - ✅ Multi-threaded Barnes–Hut force accumulation is available via `--threads`.
+- ✅ Deterministic benchmark workflow implemented (`scripts/bench_sweep_deterministic.sh`) for reproducible CI sweeps.
 
 ## Reference source for core algorithm/math
 - Canonical paper: *A hierarchical O(N log N) force-calculation algorithm* (Barnes & Hut, 1986), DOI `10.1038/324446a0`.
@@ -180,9 +181,9 @@ Implement a max-performance, memory-frugal Barnes–Hut engine with a clear spee
 - Persistent paging for huge runs (`N` in the high six/low seven digits) with chunked output if memory cap is exceeded.
 
 ## Deliverable checklist
-- [ ] Reproducible CLI or script to run deterministic benchmark set.
-- [ ] Barnes–Hut path is default for large N.
-- [ ] O(n²) baseline retained for debug/verification.
+- [x] Reproducible CLI or script to run deterministic benchmark set.
+- [x] Barnes–Hut path is default for large N (via default `mode = barnes_hut`).
+- [x] O(n²) baseline retained for debug/verification (`--mode=direct`).
 - [x] Metrics logged each run (`N`, step ms, memory bytes, error, energy drift).
 - [x] Memory pool usage stays bounded and does not grow after first allocation.
 - [x] Optional deterministic frame capture path emits numbered PPM frames and ready-to-run render command.

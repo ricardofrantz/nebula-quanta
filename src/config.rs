@@ -9,12 +9,16 @@ pub struct Args {
     pub steps: usize,
     #[arg(long, default_value_t = 0.001)]
     pub dt: f64,
+    /// Barnes–Hut opening angle. Use theta <= 0 to run the direct-force baseline.
     #[arg(long, default_value_t = 0.7)]
     pub theta: f64,
+    /// Softening term used by both Barnes–Hut and direct-force solvers.
     #[arg(long, default_value_t = 0.01)]
     pub epsilon: f64,
     #[arg(long, default_value_t = 42)]
     pub seed: u64,
+    /// Solver mode (`barnes_hut` or `direct`; aliases `barneshut`/`bh` are accepted).
+    /// Default is Barnes–Hut for large-scale runs; `direct` retains the O(n²) baseline.
     #[arg(long, default_value = "barnes_hut")]
     pub mode: String,
     #[arg(long)]

@@ -31,6 +31,6 @@ jobs:
           fi
           echo "README repo name check passed."
 
-      - name: Smoke benchmark sweep with CSV output
+      - name: Smoke deterministic benchmark sweep with CSV output
         run: |
           bash scripts/smoke_bench_sweep.sh

@@ -11,6 +11,7 @@ Options:
   --steps <integration steps>        (default: 200)
   --dt <time step>                  (default: 0.001)
   --epsilon <softening>             (default: 0.01)
+  --seed <rng seed>                 (default: 42)
   --theta <comma-separated list>    (default: 0.3,0.5,0.7,1.0)
   --threads <comma-separated list>  (default: 1)
   --mode <barnes_hut|direct>        (default: barnes_hut)
@@ -23,6 +24,7 @@ N=20000
 STEPS=200
 DT=0.001
 EPSILON=0.01
+SEED=42
 THETAS=0.3,0.5,0.7,1.0
 THREADS=1
 MODE=barnes_hut
@@ -44,6 +46,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --epsilon)
       EPSILON=$2
+      shift 2
+      ;;
+    --seed)
+      SEED=$2
       shift 2
       ;;
     --theta)
@@ -86,7 +92,7 @@ for theta in "${THE_LIST[@]}"; do
       continue
     fi
 
-    CMD=(cargo run --release -- --mode "$MODE" --n "$N" --steps "$STEPS" --dt "$DT" --theta "$theta" --epsilon "$EPSILON")
+    CMD=(cargo run --release -- --mode "$MODE" --n "$N" --steps "$STEPS" --dt "$DT" --theta "$theta" --epsilon "$EPSILON" --seed "$SEED")
 
     if [[ "$MODE" == "barnes_hut" ]]; then
       CMD+=(--threads "$thread_count")
@@ -125,12 +131,12 @@ for theta in "${THE_LIST[@]}"; do
 
       if [[ ! -s "$CSV_OUT" ]]; then
         {
-          echo "theta,threads,mode,n,steps,dt,theta_value,epsilon,build_ms,force_ms,integrate_ms,total_ms,avg_step_ms,steps_per_sec,ns_per_particle_force,peak_nodes,node_capacity,node_utilization,workspace_bytes,bytes_per_particle,particle_bytes,node_bytes,stack_bytes"
+          echo "theta,threads,mode,n,steps,dt,theta_value,epsilon,seed,build_ms,force_ms,integrate_ms,total_ms,avg_step_ms,steps_per_sec,ns_per_particle_force,peak_nodes,node_capacity,node_utilization,workspace_bytes,bytes_per_particle,particle_bytes,node_bytes,stack_bytes"
         } > "$CSV_OUT"
       fi
 
       {
-        echo "$(field theta "$summary_line"),$(field threads "$summary_line"),$(field mode "$summary_line"),$(field n "$summary_line"),$(field steps "$summary_line"),$(field dt "$summary_line"),$(field theta "$summary_line"),$(field epsilon "$summary_line"),$(field build_ms "$summary_line"),$(field force_ms "$summary_line"),$(field integrate_ms "$summary_line"),$(field total_ms "$summary_line"),$(field avg_step_ms "$summary_line"),$(field steps_per_sec "$summary_line"),$(field ns_per_particle_force "$summary_line"),$(field peak_nodes "$summary_line"),$(field node_capacity "$summary_line"),$(field node_utilization "$summary_line"),$(field workspace_bytes "$summary_line"),$(field bytes_per_particle "$summary_line"),$(field particle_bytes "$summary_line"),$(field node_bytes "$summary_line"),$(field stack_bytes "$summary_line")"
+        echo "$(field theta "$summary_line"),$(field threads "$summary_line"),$(field mode "$summary_line"),$(field n "$summary_line"),$(field steps "$summary_line"),$(field dt "$summary_line"),$(field theta "$summary_line"),$(field epsilon "$summary_line"),${SEED},$(field build_ms "$summary_line"),$(field force_ms "$summary_line"),$(field integrate_ms "$summary_line"),$(field total_ms "$summary_line"),$(field avg_step_ms "$summary_line"),$(field steps_per_sec "$summary_line"),$(field ns_per_particle_force "$summary_line"),$(field peak_nodes "$summary_line"),$(field node_capacity "$summary_line"),$(field node_utilization "$summary_line"),$(field workspace_bytes "$summary_line"),$(field bytes_per_particle "$summary_line"),$(field particle_bytes "$summary_line"),$(field node_bytes "$summary_line"),$(field stack_bytes "$summary_line")"
       } >> "$CSV_OUT"
     fi
 
