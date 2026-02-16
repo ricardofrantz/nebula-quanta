@@ -58,6 +58,10 @@ while [[ $# -gt 0 ]]; do
       ENERGY_DRIFT=$2
       shift 2
       ;;
+    --energy-drift=*)
+      ENERGY_DRIFT=${1#*=}
+      shift
+      ;;
     --theta)
       THETAS=$2
       shift 2

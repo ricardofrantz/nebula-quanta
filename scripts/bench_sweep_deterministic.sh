@@ -11,6 +11,7 @@ Options:
   --steps <integration steps>        (default: 200)
   --dt <time step>                  (default: 0.001)
   --epsilon <softening>             (default: 0.01)
+  --energy-drift <auto|on|off>      (default: auto)
   --seed <rng seed>                 (default: 42)
   --theta <comma-separated list>    (default: 0.3,0.5,0.7,1.0)
   --threads <comma-separated list>  (default: 1)
@@ -24,6 +25,7 @@ N=20000
 STEPS=200
 DT=0.001
 EPSILON=0.01
+ENERGY_DRIFT=auto
 SEED=42
 THETAS=0.3,0.5,0.7,1.0
 THREADS=1
@@ -47,6 +49,14 @@ while [[ $# -gt 0 ]]; do
     --epsilon)
       EPSILON=$2
       shift 2
+      ;;
+    --energy-drift)
+      ENERGY_DRIFT=$2
+      shift 2
+      ;;
+    --energy-drift=*)
+      ENERGY_DRIFT=${1#*=}
+      shift
       ;;
     --seed)
       SEED=$2
@@ -91,6 +101,7 @@ bash "$(dirname "$0")/bench_sweep.sh" \
   --steps "$STEPS" \
   --dt "$DT" \
   --epsilon "$EPSILON" \
+  --energy-drift "$ENERGY_DRIFT" \
   --seed "$SEED" \
   --theta "$THETAS" \
   --threads "$THREADS" \
