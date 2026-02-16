@@ -12,6 +12,7 @@ Options:
   --dt <time step>                  (default: 0.001)
   --epsilon <softening>             (default: 0.01)
   --seed <rng seed>                 (default: 42)
+  --energy-drift <auto|on|off>      (default: auto)
   --theta <comma-separated list>    (default: 0.3,0.5,0.7,1.0)
   --threads <comma-separated list>  (default: 1)
   --mode <barnes_hut|direct>        (default: barnes_hut)
@@ -25,6 +26,7 @@ STEPS=200
 DT=0.001
 EPSILON=0.01
 SEED=42
+ENERGY_DRIFT=auto
 THETAS=0.3,0.5,0.7,1.0
 THREADS=1
 MODE=barnes_hut
@@ -50,6 +52,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --seed)
       SEED=$2
+      shift 2
+      ;;
+    --energy-drift)
+      ENERGY_DRIFT=$2
       shift 2
       ;;
     --theta)
@@ -92,7 +98,7 @@ for theta in "${THE_LIST[@]}"; do
       continue
     fi
 
-    CMD=(cargo run --release -- --mode "$MODE" --n "$N" --steps "$STEPS" --dt "$DT" --theta "$theta" --epsilon "$EPSILON" --seed "$SEED")
+    CMD=(cargo run --release -- --mode "$MODE" --n "$N" --steps "$STEPS" --dt "$DT" --theta "$theta" --epsilon "$EPSILON" --seed "$SEED" --energy-drift "$ENERGY_DRIFT")
 
     if [[ "$MODE" == "barnes_hut" ]]; then
       CMD+=(--threads "$thread_count")

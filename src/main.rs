@@ -14,8 +14,6 @@ use direct::run_direct;
 use particle::{total_mechanical_energy, ParticleSoa};
 use std::path::PathBuf;
 
-const ENERGY_DRIFT_PARTICLE_LIMIT: usize = 8_192;
-
 fn main() {
     let args = Args::parse();
 
@@ -29,7 +27,7 @@ fn main() {
     }
 
     let mut particles = ParticleSoa::random(args.n, args.seed);
-    let initial_energy = if args.n <= ENERGY_DRIFT_PARTICLE_LIMIT {
+    let initial_energy = if args.should_measure_energy_drift() {
         Some(total_mechanical_energy(&particles, args.epsilon))
     } else {
         None

@@ -117,6 +117,7 @@ scripts/bench_sweep_deterministic.sh --n 20000 --steps 200 --dt 0.0008 --epsilon
 - `--epsilon <softening>`
 - `--seed <rng seed>`
 - `--validate` (run direct-force reference check; run `--mode=direct` for full O(n²) baseline behavior)
+- `--energy-drift <auto|on|off>` (default: `auto`, computes energy drift for `N <= 8192` only)
 - `--record` (enable frame export)
 - `--frames-dir <dir>` (default `frames`)
 - `--width <pixels>`
@@ -147,6 +148,8 @@ Given the same `--seed`, `--n`, `--steps`, and runtime flags, output is repeatab
 For runs with modest system size (`N <= 8192`), each summary includes:
 - `energy_drift_abs` and `energy_drift_rel`.
 - `na` for larger runs where exact energy scan would add excessive O(N²) overhead.
+
+In `--energy-drift=auto` (default), energy drift is computed for modest workloads and skipped for larger ones. Use `--energy-drift=on` to force it, or `--energy-drift=off` to suppress it.
 
 ## Validation
 
