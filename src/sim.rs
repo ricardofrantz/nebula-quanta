@@ -26,10 +26,7 @@ pub fn run_barnes_hut(
     }
 
     let n = particles.len();
-    let node_capacity = n
-        .checked_mul(4)
-        .and_then(|v| v.checked_add(1))
-        .ok_or_else(|| "node capacity overflow for requested particle count".to_string())?;
+    let node_capacity = preflight_node_capacity(n)?;
     let particle_state_bytes = particle_state_bytes(n);
     let node_pool_bytes = node_pool_bytes(node_capacity);
     let traversal_stack_bytes = traversal_stack_bytes(node_capacity);
@@ -264,11 +261,13 @@ fn split_leaf(tree: &mut QuadTree, node_idx: usize) -> Result<(), String> {
         return Ok(());
     }
 
-    if tree.nodes.len() + 4 > tree.nodes.capacity() {
+    if !tree.can_grow(4) {
         return Err(format!(
-            "tree node capacity exceeded while splitting node {} (n={})",
+            "tree node capacity exceeded while splitting node {} (used={}, capacity={})",
             node_idx,
             tree.nodes.len()
+            ,
+            tree.capacity()
         ));
     }
 
@@ -382,6 +381,12 @@ fn compute_accel_barnes_hut(
 const F64_BYTES: usize = size_of::<f64>();
 const NODE_BYTES: usize = size_of::<Node>();
 const USIZE_BYTES: usize = size_of::<usize>();
+
+fn preflight_node_capacity(n: usize) -> Result<usize, String> {
+    n.checked_mul(4)
+        .and_then(|v| v.checked_add(1))
+        .ok_or_else(|| "node capacity overflow for requested particle count".to_string())
+}
 
 fn particle_state_bytes(n: usize) -> usize {
     n.saturating_mul(5).saturating_mul(F64_BYTES)

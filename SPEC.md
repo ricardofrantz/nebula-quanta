@@ -3,6 +3,7 @@
 ## 1) Purpose
 
 Implement a high-performance, memory-efficient Barnes–Hut simulation engine centered on 2D gravity with a small code surface and a Bun orchestration layer.
+Optional deterministic frame capture is supported for high-definition offline rendering of long runs without changing simulation math.
 
 ## 2) Scale target
 
@@ -19,6 +20,7 @@ Implement a high-performance, memory-efficient Barnes–Hut simulation engine ce
 - Keep behavior deterministic and auditable with a reference direct mode.
 - Keep memory traffic low through SoA layout and fixed-size, packed node storage.
 - Make per-run metrics first-class: time, structural memory occupancy, and optional validation deltas.
+- Include optional deterministic PPM frame capture for reproducible post-run video encoding.
 
 ## 4) Definitions
 
@@ -42,10 +44,11 @@ Implement a high-performance, memory-efficient Barnes–Hut simulation engine ce
 - Seeded initial conditions.
 - Metrics: speed, force error, energy drift, and memory usage.
 - Memory policy: no per-step core allocations.
+- Optional `PPM` frame export pipeline (`frame_%06d.ppm`) with bounded incremental memory.
 
 ### Out-of-scope (initial release)
 
-- Real-time rendering pipeline.
+- Interactive real-time rendering pipeline.
 - GPU compute implementation.
 - 3D octree implementation.
 - Distributed execution.
@@ -63,7 +66,7 @@ Implement a high-performance, memory-efficient Barnes–Hut simulation engine ce
 6. The system shall provide a direct-force reference implementation using the same integrator.
 7. The system shall integrate state with leapfrog/velocity Verlet (default).
 8. The system shall accept CLI flags including:
-    - `--mode`, `--n`, `--steps`, `--dt`, `--theta`, `--epsilon`, `--seed`, `--validate`.
+    - `--mode`, `--n`, `--steps`, `--dt`, `--theta`, `--epsilon`, `--seed`, `--validate`, `--record`, `--frames-dir`, `--width`, `--height`, `--fps`, `--every-steps`.
 9. The system shall emit per-run outputs:
    - phase timings (`build`, `force`, `integrate`),
    - optional validation metrics (RMS/max position and velocity deltas),
@@ -71,6 +74,8 @@ Implement a high-performance, memory-efficient Barnes–Hut simulation engine ce
 10. The system shall allocate all major core buffers during initialization and reuse them.
 11. The system shall cap node pool capacity and return a deterministic error if a step exceeds capacity.
 12. The system shall support reproducible replay of scenarios from logged configuration.
+13. The system shall support bounded per-step output cadence controls via `--every-steps`.
+14. The optional frame recorder shall avoid allocations in hot force/build/integrate loops and use a fixed-size RGB buffer.
 
 ## 7) Performance and memory requirements
 
@@ -81,6 +86,8 @@ Implement a high-performance, memory-efficient Barnes–Hut simulation engine ce
 - Child links must be compact indices, not heap pointers.
 - Traversal and build should use reusable index stacks.
 - Failure policy: if capacity is exceeded, fail fast with explicit diagnostics (N, node count, cause).
+- Recording path must not mutate simulation state or force path timing behavior.
+- Frame encoding must remain a post-run concern (`ffmpeg` external to simulation).
 
 ## 8) Validation strategy
 
@@ -119,9 +126,19 @@ Implement a high-performance, memory-efficient Barnes–Hut simulation engine ce
 - Fields:
   - `x_min`, `x_max`, `y_min`, `y_max`
   - `mass`, `com_x`, `com_y`
-  - `children[4]` indices
-  - `body_index` / `leaf` marker
+- `children[4]` indices
+- `body_index` / `leaf` marker
 - Node storage is fixed-capacity, contiguous, reusable.
+
+### Frame export (optional)
+
+- State is only enabled when `--record` is set.
+- Reusable state:
+  - output directory
+  - width/height
+  - byte buffer sized `width*height*3` and reused per frame
+  - frame counter and naming index
+- Output format is binary PPM (`P6`) with filenames `frame_%06d.ppm`.
 
 ## 10) Acceptance criteria
 
@@ -130,6 +147,7 @@ Implement a high-performance, memory-efficient Barnes–Hut simulation engine ce
 - Logs include timing and memory metrics for every run, with optional error metrics when validation is enabled.
 - No per-step allocations in release-critical loops.
 - Node-pool and particle buffers do not grow after initialization.
+- Frame capture must avoid per-step hot-loop allocations and writes through preallocated buffers.
 
 ## 11) Risks and mitigations
 

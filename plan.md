@@ -31,6 +31,12 @@ Implement a max-performance, memory-frugal Barnes–Hut engine with a clear spee
 - Memory model: fixed memory pools with explicit capacity planning for worst expected `N`.
 - Numeric model: default to `f64` if accuracy is critical, allow optional `f32` mode for throughput experiments.
 
+## Current status (2026-02-16)
+- ✅ 2D Barnes–Hut engine and direct-force baseline are in place.
+- ✅ Memory telemetry and bounded-node diagnostics are implemented.
+- ✅ Optional frame capture path is implemented (`--record`, `--frames-dir`, `--width`, `--height`, `--fps`, `--every-steps`) with built `ffmpeg` command output.
+- ✅ Bun launcher remains a thin orchestrator; Rust stays authoritative for numerics.
+
 ## Reference source for core algorithm/math
 - Canonical paper: *A hierarchical O(N log N) force-calculation algorithm* (Barnes & Hut, 1986), DOI `10.1038/324446a0`.
 - Core idea reference page: https://en.wikipedia.org/wiki/Barnes%E2%80%93Hut_simulation
@@ -144,6 +150,9 @@ Implement a max-performance, memory-frugal Barnes–Hut engine with a clear spee
   - run short sweeps on candidate `θ` values (for example `0.3, 0.5, 0.7, 1.0`),
   - choose the smallest `θ` meeting speed/accuracy targets.
 - Introduce optional parallelism in force accumulation (`rayon`) only after single-thread tuning is complete.
+- Add capture I/O budgeting separately from physics timing:
+  - measure frame write throughput and filesystem bottlenecks with fixed cadence.
+  - confirm simulation timing is unchanged when recording is off.
 
 ## Milestone 5 — Verification and tuning (0.5–1 day)
 - Run convergence checks over fixed datasets:
@@ -151,6 +160,12 @@ Implement a max-performance, memory-frugal Barnes–Hut engine with a clear spee
   - short-horizon position/energy divergence.
 - Sweep `(θ, ε, dt)` and record Pareto points for speed/accuracy.
 - Document recommended presets (fast / balanced / accurate).
+- Add stress tests for large-`N` node capacity and deterministic hard-fail diagnostics.
+
+## Milestone 5a — Video throughput hardening
+- Add a short render helper command section in `README.md` for high-FPS exports.
+- Include 60/120 fps and 4K profiles with explicit `ffmpeg` presets and codec options.
+- Keep frame export outside benchmark hot path; support recording at `N=0` overhead when disabled.
 
 ## Milestone 6 — Optional next phase
 - 3D octree variant.
@@ -164,5 +179,7 @@ Implement a max-performance, memory-frugal Barnes–Hut engine with a clear spee
 - [ ] Reproducible CLI or script to run deterministic benchmark set.
 - [ ] Barnes–Hut path is default for large N.
 - [ ] O(n²) baseline retained for debug/verification.
-- [ ] Metrics logged each run (`N`, step ms, memory bytes, error, energy drift).
-- [ ] Memory pool usage stays bounded and does not grow after first allocation.
+- [x] Metrics logged each run (`N`, step ms, memory bytes, error, energy drift).
+- [x] Memory pool usage stays bounded and does not grow after first allocation.
+- [x] Optional deterministic frame capture path emits numbered PPM frames and ready-to-run render command.
+- [x] Rendering helper for high-rate offline encode (`scripts/render_video.sh`) is documented in README.

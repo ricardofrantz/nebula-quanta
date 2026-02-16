@@ -11,6 +11,7 @@
   "scripts": {
     "nq": "bun run run.ts",
     "start": "bun run nq",
-    "run": "bun run nq"
+    "run": "bun run nq",
+    "render": "bash scripts/render_video.sh"
   }
 }

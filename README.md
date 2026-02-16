@@ -4,15 +4,13 @@
 [![Crates.io](https://img.shields.io/crates/v/nebula-quanta.svg)](https://crates.io/crates/nebula-quanta)
 
 `nq` is a focused Barnes–Hut N-body simulation CLI in Rust.
-It keeps core loops lean and memory bounded for large particle counts, with a built-in direct-force baseline for correctness checks.
+It is engineered for fast, memory-frugal runs with a deterministic direct-force baseline.
+The short executable name is `nq` and the Rust crate is `nebula-quanta`.
 
 ## About
 
-`nq` is the short command name for this project.
-
-You get two layers:
-- Rust engine (`nebula-quanta`) for compute and deterministic behavior.
-- Bun launcher (`run.ts`) for scriptable local invocation and workflow glue.
+- Rust core: compute-heavy Barnes–Hut and direct-force solvers.
+- Bun launch layer: simple scriptable local runner in `run.ts`.
 
 ## Topics
 
@@ -22,82 +20,102 @@ You get two layers:
 - SoA particle layout
 - Performance-first CLI tooling
 - Deterministic benchmarks
+- High-rate frame capture
+- Offline MP4 rendering
+- Memory telemetry
 
 ## Why the name
 
-- **Nebula** reflects dense particle clouds and large interacting fields.
-- **Quanta** reflects individual bodies and lightweight computational units.
-- **`nq`** gives a short, memorable command.
+- **Nebula** reflects dense interacting particle fields.
+- **Quanta** reflects each independent body as a compact unit of mass and state.
+- **`nq`** is a short, stable executable name for scripts and batch runs.
 
 ## Quick start
 
 ```bash
-cargo install nebula-quanta
+cargo install --path .
 nq --mode=barnes_hut --n 10000 --steps 200 --dt 0.001 --theta 0.6 --epsilon 0.01
 ```
 
-Local dev run:
+Local development invocation:
 
 ```bash
 bun run nq -- --mode=direct --n 1024 --steps 20 --validate --theta 0.7 --epsilon 0.01
 ```
 
+## High-definition + high-FPS workflow
+
+Use `--record` to export raw PPM frames and then encode with `ffmpeg`:
+
+```bash
+bun run nq \
+  -- --mode=barnes_hut --n 20000 --steps 400 --dt 0.0008 --theta 0.7 \
+  --record --frames-dir ./capture --width 1920 --height 1080 --fps 60 --every-steps 1
+```
+
+The run prints `record_frames` and a ready-to-run `render_cmd`, for example:
+
+```text
+record_frames=401 render_cmd="ffmpeg -y -framerate 60 -i capture/frame_%06d.ppm -s 1920x1080 -c:v libx264 -pix_fmt yuv420p nebula-quanta-barnes_hut.mp4"
+```
+
+For very long runs, reduce I/O using `--every-steps K` and keep K tuned to your target duration.
+
+```bash
+ffmpeg -y -framerate 60 -i capture/frame_%06d.ppm -c:v libx264 -pix_fmt yuv420p nebula-quanta-barnes_hut.mp4
+```
+
+You can also use the repo helper:
+
+```bash
+scripts/render_video.sh capture nebula-quanta-barnes_hut.mp4 60 20 fast libx264
+```
+
+```bash
+bun run render capture nebula-quanta-barnes_hut.mp4 60 20 fast libx264
+```
+
 ## CLI controls
 
 - `--mode barnes_hut|direct`
-- `--n  <particle count>`
+- `--n <particle count>`
 - `--steps <integration steps>`
 - `--dt <time step>`
 - `--theta <barnes-hut opening angle>`
 - `--epsilon <softening>`
 - `--seed <rng seed>`
-- `--validate` (direct-force reference run)
+- `--validate` (run direct-force reference check)
+- `--record` (enable frame export)
+- `--frames-dir <dir>` (default `frames`)
+- `--width <pixels>`
+- `--height <pixels>`
+- `--fps <frames per second>`
+- `--every-steps <n>` (record every nth step)
 
-## Example output
+## Performance profile
 
 ```text
-mode=barnes_hut n=10000 steps=200 theta=0.6 epsilon=0.01 dt=0.001 build_ms=12.34 force_ms=58.91 integrate_ms=4.21 peak_nodes=3801 node_capacity=40001
+mode=barnes_hut n=10000 steps=200 theta=0.6 epsilon=0.01 dt=0.001 build_ms=12.34 force_ms=58.91 integrate_ms=4.21 total_ms=75.46 avg_step_ms=0.377 steps_per_sec=2654.7 ns_per_particle_force=294.5 peak_nodes=3801 node_capacity=40001 node_utilization=34.5 workspace_bytes=1234567 bytes_per_particle=128.0 particle_bytes=400000 node_bytes=123456 stack_bytes=16384
 ```
 
 ## Core architecture
 
-- Core simulator in Rust: `src/main.rs`, `src/config.rs`, `src/sim.rs`, `src/direct.rs`, `src/tree.rs`, `src/particle.rs`
-- Metrics and diagnostics in `src/stats.rs`
-- Bun launcher in `run.ts`
-
-## Distribution
-
-Crate path:
-
-```bash
-cargo install nebula-quanta
-```
-
-Bun path:
-
-```bash
-bun run nq -- --help
-```
+- Rust simulator: `src/main.rs`, `src/config.rs`, `src/sim.rs`, `src/direct.rs`, `src/tree.rs`, `src/particle.rs`
+- Telemetry: `src/stats.rs`
+- Frame output: `src/frame.rs`
+- Bun launcher: `run.ts`
 
 ## Reproducibility
 
 Simulations are deterministic by seed.
-The same `--seed`, `--n`, `--steps`, and parameter set gives reproducible output.
+Given the same `--seed`, `--n`, `--steps`, and runtime flags, output is repeatable.
 
 ## Validation
 
-`--validate` runs a direct-force cross-check and prints:
-- RMS/max position error
-- RMS/max velocity error
-
-Use this on smaller workloads to confirm Barnes-Hut accuracy in your parameter regime.
+`--validate` compares Barnes–Hut against direct-force on reduced workloads and prints RMS/max deltas in position and velocity.
 
 ## References
 
 - Barnes–Hut overview: https://en.wikipedia.org/wiki/Barnes%E2%80%93Hut_simulation
 - Barnes & Hut original: Nature 324(4):446–449
-- Rust implementation pattern reference: https://docs.rs/nbody_barnes_hut/latest/nbody_barnes_hut/
-
-## Status
-
-Planning and implementation are aligned in `SPEC.md` and `plan.md`.
+- Rust reference: https://docs.rs/nbody_barnes_hut/latest/nbody_barnes_hut/

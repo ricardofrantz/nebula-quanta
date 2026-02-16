@@ -51,13 +51,17 @@ impl Node {
 
 pub struct QuadTree {
     pub nodes: Vec<Node>,
+    capacity: usize,
 }
 
 impl QuadTree {
     pub fn with_capacity(max_nodes: usize) -> Self {
         let mut nodes = Vec::with_capacity(max_nodes);
         nodes.push(Node::empty());
-        Self { nodes }
+        Self {
+            nodes,
+            capacity: max_nodes,
+        }
     }
 
     pub fn reset(&mut self, x_min: f64, x_max: f64, y_min: f64, y_max: f64) {
@@ -68,5 +72,13 @@ impl QuadTree {
     pub fn root_bounds(&self) -> Option<(f64, f64, f64, f64)> {
         let node = self.nodes.first()?;
         Some((node.x_min, node.x_max, node.y_min, node.y_max))
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    pub fn can_grow(&self, additional: usize) -> bool {
+        self.nodes.len().checked_add(additional).is_some_and(|next| next <= self.capacity)
     }
 }

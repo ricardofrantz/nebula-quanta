@@ -57,7 +57,7 @@ fn main() {
     match result {
         Ok((mode_name, stats)) => {
             println!(
-                "mode={} n={} steps={} theta={} epsilon={} dt={} build_ms={:.3} force_ms={:.3} integrate_ms={:.3} peak_nodes={} node_capacity={} node_utilization={:.2}% workspace_bytes={} bytes_per_particle={:.1} particle_bytes={} node_bytes={} stack_bytes={}",
+                "mode={} n={} steps={} theta={} epsilon={} dt={} build_ms={:.3} force_ms={:.3} integrate_ms={:.3} total_ms={:.3} avg_step_ms={:.3} steps_per_sec={:.3} ns_per_particle_force={:.1} peak_nodes={} node_capacity={} node_utilization={:.2}% workspace_bytes={} bytes_per_particle={:.1} particle_bytes={} node_bytes={} stack_bytes={}",
                 mode_name,
                 args.n,
                 args.steps,
@@ -67,6 +67,10 @@ fn main() {
                 stats.build_ms,
                 stats.force_ms,
                 stats.integrate_ms,
+                stats.total_ms(),
+                stats.avg_step_ms(args.steps),
+                stats.steps_per_sec(args.steps),
+                stats.force_ns_per_particle_step(args.steps, args.n),
                 stats.peak_node_count,
                 stats.node_capacity,
                 stats.node_utilization() * 100.0,

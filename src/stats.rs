@@ -44,4 +44,30 @@ impl RunStats {
         self.workspace_bytes() as f64 / self.particle_count as f64
     }
 
+    pub fn total_ms(&self) -> f64 {
+        self.build_ms + self.force_ms + self.integrate_ms
+    }
+
+    pub fn avg_step_ms(&self, steps: usize) -> f64 {
+        if steps == 0 {
+            return 0.0;
+        }
+        self.total_ms() / steps as f64
+    }
+
+    pub fn steps_per_sec(&self, steps: usize) -> f64 {
+        let total = self.total_ms();
+        if steps == 0 || total <= 0.0 {
+            return 0.0;
+        }
+        1000.0 * steps as f64 / total
+    }
+
+    pub fn force_ns_per_particle_step(&self, steps: usize, particles: usize) -> f64 {
+        let denom = (steps.saturating_mul(particles)) as f64;
+        if denom == 0.0 {
+            return 0.0;
+        }
+        self.force_ms * 1_000_000.0 / denom
+    }
 }
