@@ -1,6 +1,4 @@
-# Nebula Quanta (`nebula-quanta`)
-
-## Latest simulation output
+# Nebula Quanta
 
 [![Watch the simulation](./nebula-quanta-barnes_hut.gif)](./nebula-quanta-barnes_hut.mp4)
 
