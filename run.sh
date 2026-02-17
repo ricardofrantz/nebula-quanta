@@ -48,6 +48,7 @@ Physics controls:
   --energy-sample-ratio <0..1>
   --dim <2|3> (3 is planned; 2 ready)
   --validate
+  --gif        (generate animated GIF from rendered MP4)
   --max-memory-mib <MiB>   default: 20% of available memory
   --preset <fast|balanced|accurate>
   --threads <thread_count> (performance control, includes Barnes-Hut and preset overrides)
@@ -94,6 +95,7 @@ MAX_MEMORY_MIB=""
 AVAILABLE_MEMORY_MIB=""
 MAX_MEMORY_SOURCE=""
 VALIDATE=0
+GIF=0
 PRESET="fast"
 FRAMES_DIR="frames"
 WIDTH=1920
@@ -105,6 +107,7 @@ SHOW_CONFIG=0
 declare -a EXTRA_ARGS=()
 declare -a MAX_MEMORY_ARG=()
 declare -a VALIDATE_ARG=()
+declare -a GIF_ARG=()
 declare -a RECORD_ARGS=()
 
 show_config() {
@@ -144,6 +147,7 @@ available_memory_mib=${AVAILABLE_MEMORY_MIB:-na}
 max_memory_mib=${MAX_MEMORY_MIB:-na}
 preset=$PRESET
 validate=$VALIDATE
+gif=$GIF
   frames_dir=$FRAMES_DIR
   width=$WIDTH
   height=$HEIGHT
@@ -295,6 +299,10 @@ while [[ $# -gt 0 ]]; do
       VALIDATE=1
       shift
       ;;
+    --gif)
+      GIF=1
+      shift
+      ;;
     --frames-dir)
       FRAMES_DIR=$2
       shift 2
@@ -384,6 +392,12 @@ else
   VALIDATE_ARG=()
 fi
 
+if [[ "$GIF" -eq 1 ]]; then
+  GIF_ARG=(--gif)
+else
+  GIF_ARG=()
+fi
+
 RECORD_ARGS=(--record --frames-dir "$FRAMES_DIR" --width "$WIDTH" --height "$HEIGHT" --fps "$FPS" --every-steps "$EVERY_STEPS")
 
 if [[ "$SHOW_CONFIG" -eq 1 ]]; then
@@ -462,4 +476,5 @@ bun run nq -- \
   "${MAX_MEMORY_ARG[@]+"${MAX_MEMORY_ARG[@]}"}" \
   "${VALIDATE_ARG[@]+"${VALIDATE_ARG[@]}"}" \
   "${RECORD_ARGS[@]+"${RECORD_ARGS[@]}"}" \
+  "${GIF_ARG[@]+"${GIF_ARG[@]}"}" \
   "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"

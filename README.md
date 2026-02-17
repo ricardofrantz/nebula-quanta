@@ -53,6 +53,12 @@ Use repository launcher defaults (frame capture + mp4 output on by default):
 
 ```bash
 ./run.sh
+
+Generate an animated GIF preview instead of only MP4:
+
+```bash
+./run.sh --gif
+```
 ```
 
 Local development invocation (release optimized by default):
@@ -201,6 +207,7 @@ ffmpeg -y -framerate 30 -i captured_run/frame_%06d.ppm -c:v libx264 -pix_fmt yuv
 - `--energy-drift <auto|on|off>` (default: `auto`, computes energy drift for `N <= 8192` only)
 - `--energy-sample-ratio <0..1>` (set >0 to sample potential energy on any size N)
 - `--record` (enable frame export)
+- `--gif` (generate animated GIF from rendered MP4)
 - `--frames-dir <dir>` (default `frames`)
 - `--width <pixels>`
 - `--height <pixels>`

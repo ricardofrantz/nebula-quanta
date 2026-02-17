@@ -58,6 +58,7 @@ const formatPerfSummary = (summaryLine: string): string => {
 
 const args = argv.slice(2);
 let useRelease = true;
+let doSaveGif = false;
 const presetArgs: string[] = [];
 const simArgs: string[] = [];
 
@@ -74,6 +75,33 @@ type RenderMeta = {
   resolution: string;
   output: string;
   frames: string;
+};
+
+const gifOutputPath = (outputPath: string): string => {
+  if (outputPath.toLowerCase().endsWith('.mp4')) {
+    return `${outputPath.slice(0, -4)}.gif`;
+  }
+  return `${outputPath}.gif`;
+};
+
+const parseFps = (value: string): number => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 10;
+  }
+  return Math.max(1, Math.min(60, Math.floor(parsed)));
+};
+
+const parseBoolFlag = (value: string): boolean => {
+  const normalized = value.trim().toLowerCase();
+  return (
+    normalized === '' ||
+    normalized === '1' ||
+    normalized === 'true' ||
+    normalized === 'yes' ||
+    normalized === 'on' ||
+    normalized === 'y'
+  );
 };
 
 const extractRenderMetadata = (stdout: string): RenderMeta | null => {
@@ -169,7 +197,7 @@ const VALUE_OPTIONS = new Set([
   '--every-steps',
 ]);
 
-const BOOL_OPTIONS = new Set(['--validate', '--record']);
+const BOOL_OPTIONS = new Set(['--validate', '--record', '--gif']);
 
 const dedupeLastWins = (args: string[]): string[] => {
   const reversed: string[] = [];
@@ -214,6 +242,11 @@ for (let i = 0; i < args.length; i += 1) {
   }
   if (arg === '--debug') {
     useRelease = false;
+    continue;
+  }
+  if (arg === '--gif' || arg.startsWith('--gif=')) {
+    const value = arg === '--gif' ? 'true' : arg.slice('--gif='.length);
+    doSaveGif = parseBoolFlag(value);
     continue;
   }
 
@@ -369,6 +402,87 @@ if (doSave) {
     `[perf] render output=${renderMeta.output} frames=${renderMeta.frames} fps=${renderMeta.fps} encode_ms=${renderMs} resolution=${renderMeta.resolution}`,
   );
   console.log(`Saving : ${renderMeta.output}`);
+
+  if (doSaveGif) {
+    const gifOutput = gifOutputPath(renderMeta.output);
+    const gifFps = parseFps(renderMeta.fps);
+    const palettePath = `${renderMeta.output}.palette.png`;
+
+    const paletteArgs = [
+      '-y',
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-i',
+      renderMeta.output,
+      '-vf',
+      `fps=${gifFps},scale=640:-1:flags=lanczos,palettegen`,
+      palettePath,
+    ];
+
+    const paletteResult = spawnSync('ffmpeg', paletteArgs, {
+      encoding: 'utf8',
+      maxBuffer: 32 * 1024 * 1024,
+      stdio: 'inherit',
+    });
+    if (paletteResult.error) {
+      console.error(`failed to run ffmpeg palette pass: ${paletteResult.error.message}`);
+      cleanupFrameDirs(renderMeta.input);
+      process.exit(1);
+    }
+
+    if ((paletteResult.status ?? 1) !== 0) {
+      console.error(`ffmpeg palette pass exited with code ${(paletteResult.status ?? 1)} while saving ${palettePath}`);
+      cleanupFrameDirs(renderMeta.input);
+      process.exit(paletteResult.status ?? 1);
+    }
+
+    const gifStartMs = Date.now();
+    const gifArgs = [
+      '-y',
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-i',
+      renderMeta.output,
+      '-i',
+      palettePath,
+      '-filter_complex',
+      `[0:v]fps=${gifFps},scale=640:-1:flags=lanczos[x];[x][1:v]paletteuse`,
+      '-loop',
+      '0',
+      gifOutput,
+    ];
+
+    const gifResult = spawnSync('ffmpeg', gifArgs, {
+      encoding: 'utf8',
+      maxBuffer: 32 * 1024 * 1024,
+      stdio: 'inherit',
+    });
+    if (gifResult.error) {
+      console.error(`failed to run ffmpeg gif pass: ${gifResult.error.message}`);
+      cleanupFrameDirs(renderMeta.input);
+      process.exit(1);
+    }
+
+    if ((gifResult.status ?? 1) !== 0) {
+      console.error(`ffmpeg gif pass exited with code ${(gifResult.status ?? 1)} while saving ${gifOutput}`);
+      cleanupFrameDirs(renderMeta.input);
+      process.exit(gifResult.status ?? 1);
+    }
+
+    const gifMs = Date.now() - gifStartMs;
+    console.log(
+      `[perf] gif output=${gifOutput} frames=${renderMeta.frames} fps=${gifFps} encode_ms=${gifMs} resolution=${renderMeta.resolution}`,
+    );
+    console.log(`Saving : ${gifOutput}`);
+
+    try {
+      rmSync(palettePath, { force: true });
+    } catch (cleanupError) {
+      console.error(`unable to remove palette ${palettePath}: ${(cleanupError as Error).message}`);
+    }
+  }
 
   cleanupFrameDirs(renderMeta.input);
 }
