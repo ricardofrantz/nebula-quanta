@@ -2,9 +2,9 @@
 
 ## Latest simulation output
 
-[Download MP4](./nebula-quanta-barnes_hut.mp4)
+[![Watch the simulation](./nebula-quanta-barnes_hut.gif)](./nebula-quanta-barnes_hut.mp4)
 
-<video src="./nebula-quanta-barnes_hut.mp4" controls width="720" preload="metadata"></video>
+[Download MP4](./nebula-quanta-barnes_hut.mp4)
 
 ![CI](https://github.com/ricardofrantz/nebula-quanta/actions/workflows/ci.yml/badge.svg?branch=main)
 [![Crates.io](https://img.shields.io/crates/v/nebula-quanta.svg)](https://crates.io/crates/nebula-quanta)
