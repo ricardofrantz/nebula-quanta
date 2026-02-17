@@ -138,15 +138,6 @@ pub enum Dimensionality {
     Three,
 }
 
-impl Dimensionality {
-    pub const fn as_u8(&self) -> u8 {
-        match self {
-            Self::Two => 2,
-            Self::Three => 3,
-        }
-    }
-}
-
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ThetaPolicy {
     /// Use a fixed global theta value for all steps.
@@ -286,10 +277,6 @@ impl Args {
     pub fn should_measure_energy_snapshot(&self) -> bool {
         self.should_measure_energy_drift() || self.energy_sample_ratio > 0.0
     }
-
-    pub fn should_sample_energy(&self) -> bool {
-        self.energy_sample_ratio > 0.0 && self.n > 0
-    }
 }
 
 #[cfg(test)]
@@ -389,7 +376,7 @@ mod tests {
 
         let fixed_args = Args::parse_from(["nq", "--theta-policy", "fixed", "--theta", "0.6"]);
         assert_eq!(
-            fixed_args.theta_for_step(0, 1000, Some((-1.0, 1.0, -2.0, 2.0)),
+            fixed_args.theta_for_step(0, 1000, Some((-1.0, 1.0, -2.0, 2.0))),
             0.6
         );
     }

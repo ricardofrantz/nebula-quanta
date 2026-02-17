@@ -52,19 +52,6 @@ impl ParticleSoa {
         }
     }
 
-    pub fn random(n: usize, seed: u64) -> Self {
-        let mut particles = Self::with_len(n);
-        let mut rng = ChaCha8Rng::seed_from_u64(seed);
-        for i in 0..n {
-            particles.x[i] = rng.random_range(-1.0..1.0);
-            particles.y[i] = rng.random_range(-1.0..1.0);
-            particles.vx[i] = rng.random_range(-0.05..0.05);
-            particles.vy[i] = rng.random_range(-0.05..0.05);
-            particles.m[i] = rng.random_range(0.5..2.0);
-        }
-        particles
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn random_with_profiles(
         n: usize,
@@ -163,14 +150,6 @@ pub fn particle_bounds(particles: &ParticleSoa) -> Result<(f64, f64, f64, f64), 
 
     let pad_x = ((x_max - x_min).abs() + (y_max - y_min).abs()) * 1e-12 + 1.0e-6;
     Ok((x_min - pad_x, x_max + pad_x, y_min - pad_x, y_max + pad_x))
-}
-
-pub fn total_mechanical_energy(particles: &ParticleSoa, epsilon: f64) -> f64 {
-    total_mechanical_energy_with_g(particles, epsilon, 1.0)
-}
-
-pub fn total_mechanical_energy_with_g(particles: &ParticleSoa, epsilon: f64, g: f64) -> f64 {
-    total_kinetic_energy(particles) + total_potential_energy_exact(particles, epsilon, g)
 }
 
 pub fn total_momentum(particles: &ParticleSoa) -> MomentumSnapshot {
@@ -448,8 +427,9 @@ fn sample_initial_velocity(
             let dx = x - center_x;
             let dy = y - center_y;
             let r = (dx * dx + dy * dy).sqrt().max(1e-12);
-            let speed = amp
-                * (1.0 + init_lambda * (1.0 / (1.0 + (r / (radius.abs().max(1e-12)).max(1e-12)).sqrt()));
+            let denominator = r / radius.abs().max(1e-12).max(1e-12);
+            let softening = (1.0 + denominator).sqrt();
+            let speed = amp * (1.0 + init_lambda * (1.0 / softening));
             let angle = dy.atan2(dx);
             (-speed * angle.sin() + jitter_x, speed * angle.cos() + jitter_y)
         }

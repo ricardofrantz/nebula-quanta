@@ -33,7 +33,6 @@ pub fn compute_barnes_hut_accel_snapshot(
     let mut tree = QuadTree::with_capacity(node_capacity);
     let mut ax = vec![0.0; n];
     let mut ay = vec![0.0; n];
-    let mut epsilon = args.epsilon_for_step(0, n, None);
     let mut stack = Vec::with_capacity(node_capacity);
     let mut traversal_stacks: Vec<Vec<usize>> = if active_threads > 1 {
         (0..active_threads).map(|_| Vec::with_capacity(node_capacity)).collect()
@@ -43,7 +42,7 @@ pub fn compute_barnes_hut_accel_snapshot(
 
     build_tree(&mut tree, particles)?;
     let effective_theta = args.theta_for_step(0, n, tree.root_bounds());
-    epsilon = args.epsilon_for_step(0, n, tree.root_bounds());
+    let epsilon = args.epsilon_for_step(0, n, tree.root_bounds());
     compute_accel_barnes_hut(
         particles,
         &tree,
@@ -101,15 +100,13 @@ pub fn run_barnes_hut(
     let mut force_elapsed = 0.0;
     let mut integrate_elapsed = 0.0;
     let mut peak_node_count = 0usize;
-    let mut theta = args.theta_for_step(0, n, None);
-    let mut epsilon = args.epsilon_for_step(0, n, None);
+    let mut theta = args.theta_for_step(0, n, tree.root_bounds());
+    let mut epsilon = args.epsilon_for_step(0, n, tree.root_bounds());
 
     let mut step_start = Instant::now();
     build_tree(&mut tree, particles)?;
     peak_node_count = peak_node_count.max(tree.nodes.len());
     build_elapsed += step_start.elapsed().as_secs_f64() * 1000.0;
-    theta = args.theta_for_step(0, n, tree.root_bounds());
-    epsilon = args.epsilon_for_step(0, n, tree.root_bounds());
     if let Some(recorder) = recorder.as_deref_mut() {
         if let Some(bounds) = tree.root_bounds() {
             recorder.record_step(0, particles, bounds)?;
@@ -614,20 +611,22 @@ fn compute_accel_barnes_hut_parallel(
     let chunk_base = n / active_threads;
     let chunk_extra = n % active_threads;
     let stack_ptr = thread_stacks.as_mut_ptr();
+    let ax_ptr = ax.as_mut_ptr();
+    let ay_ptr = ay.as_mut_ptr();
 
-    std::thread::scope(|scope| {
+    let thread_result: Result<(), String> = std::thread::scope(|scope| {
         let mut stack_handles = Vec::with_capacity(active_threads);
         for thread_id in 0..active_threads {
             let chunk_len = chunk_base + usize::from(thread_id < chunk_extra);
             let chunk_start = thread_id * chunk_base + thread_id.min(chunk_extra);
-            let chunk_end = chunk_start + chunk_len;
-            let local_stack = unsafe { &mut *stack_ptr.add(thread_id) };
+            let mut local_stack = unsafe { &mut *stack_ptr.add(thread_id) };
             local_stack.clear();
-
-            let chunk_ax = &mut ax[chunk_start..chunk_end];
-            let chunk_ay = &mut ay[chunk_start..chunk_end];
+            let chunk_ax_ptr = unsafe { ax_ptr.add(chunk_start) } as usize;
+            let chunk_ay_ptr = unsafe { ay_ptr.add(chunk_start) } as usize;
 
             let handle = scope.spawn(move || {
+                let chunk_ax_ptr = chunk_ax_ptr as *mut f64;
+                let chunk_ay_ptr = chunk_ay_ptr as *mut f64;
                 for offset in 0..chunk_len {
                     let particle_idx = chunk_start + offset;
                     let (force_x, force_y) = compute_particle_force(
@@ -639,19 +638,24 @@ fn compute_accel_barnes_hut_parallel(
                         g,
                         &mut local_stack,
                     );
-                    chunk_ax[offset] = force_x;
-                    chunk_ay[offset] = force_y;
+                    unsafe {
+                        *chunk_ax_ptr.add(offset) = force_x;
+                        *chunk_ay_ptr.add(offset) = force_y;
+                    }
                 }
-                (thread_id, ())
+                Ok::<(), String>(())
             });
             stack_handles.push(handle);
         }
         for handle in stack_handles {
             handle
                 .join()
-                .map_err(|_| "threaded Barnes-Hut force worker panicked".to_string())?;
+                .map_err(|_| "threaded Barnes-Hut force worker panicked".to_string())??;
         }
+        Ok(())
     });
+
+    thread_result?;
 
     Ok(())
 }

@@ -32,10 +32,15 @@ pub fn run_direct(
     let mut rk2_particles = particles.clone();
     let mut rk2_ax = vec![0.0; n];
     let mut rk2_ay = vec![0.0; n];
+    let g_is_unity = (args.g - 1.0).abs() <= f64::EPSILON;
     let mut epsilon = args.epsilon_for_step(0, n, particle_bounds(particles).ok());
 
     let mut t = Instant::now();
-    compute_direct_accel_with_g(particles, epsilon, args.g, &mut ax, &mut ay);
+    if g_is_unity {
+        compute_direct_accel(particles, epsilon, &mut ax, &mut ay);
+    } else {
+        compute_direct_accel_with_g(particles, epsilon, args.g, &mut ax, &mut ay);
+    }
     build_elapsed += t.elapsed().as_secs_f64() * 1000.0;
     if let Some(recorder) = recorder.as_deref_mut() {
         recorder.record_step(0, particles, particle_bounds(particles)?)?;
@@ -78,7 +83,11 @@ pub fn run_direct(
             n,
             particle_bounds(particles).ok(),
         );
-        compute_direct_accel_with_g(particles, epsilon, args.g, &mut ax, &mut ay);
+        if g_is_unity {
+            compute_direct_accel(particles, epsilon, &mut ax, &mut ay);
+        } else {
+            compute_direct_accel_with_g(particles, epsilon, args.g, &mut ax, &mut ay);
+        }
         force_elapsed += t.elapsed().as_secs_f64() * 1000.0;
 
         t = Instant::now();
