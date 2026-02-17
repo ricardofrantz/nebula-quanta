@@ -1,13 +1,13 @@
 # Nebula Quanta (`nebula-quanta`)
 
-![CI](https://github.com/ricardofrantz/nebula-quanta/actions/workflows/ci.yml/badge.svg?branch=main)
-[![Crates.io](https://img.shields.io/crates/v/nebula-quanta.svg)](https://crates.io/crates/nebula-quanta)
-
 ## Latest simulation output
 
 [Download MP4](./nebula-quanta-barnes_hut.mp4)
 
 <video src="./nebula-quanta-barnes_hut.mp4" controls width="720" preload="metadata"></video>
+
+![CI](https://github.com/ricardofrantz/nebula-quanta/actions/workflows/ci.yml/badge.svg?branch=main)
+[![Crates.io](https://img.shields.io/crates/v/nebula-quanta.svg)](https://crates.io/crates/nebula-quanta)
 
 `nq` is a focused Barnes–Hut N-body simulation CLI in Rust.
 It is engineered for fast, memory-frugal runs with a deterministic direct-force baseline.
