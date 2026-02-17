@@ -3,6 +3,12 @@
 ![CI](https://github.com/ricardofrantz/nebula-quanta/actions/workflows/ci.yml/badge.svg?branch=main)
 [![Crates.io](https://img.shields.io/crates/v/nebula-quanta.svg)](https://crates.io/crates/nebula-quanta)
 
+## Latest simulation output
+
+[Download MP4](./nebula-quanta-barnes_hut.mp4)
+
+<video src="./nebula-quanta-barnes_hut.mp4" controls width="720" preload="metadata"></video>
+
 `nq` is a focused Barnes–Hut N-body simulation CLI in Rust.
 It is engineered for fast, memory-frugal runs with a deterministic direct-force baseline.
 The short executable name is `nq` and the Rust crate is `nebula-quanta`.
@@ -10,7 +16,7 @@ The short executable name is `nq` and the Rust crate is `nebula-quanta`.
 ## About
 
 - Rust core: compute-heavy Barnes–Hut and direct-force solvers.
-- Bun launch layer: simple scriptable local runner in `run.ts`.
+- Bun launch layer: `run.ts` is executed through `./run.sh` (performance-first defaults plus automatic MP4 export).
 - Physics presets: gravity constant, initial-condition profiles, mass profiles, and integrator selection are built into the runtime CLI.
 - Diagnostics: optional potential sampling, full energy snapshots, and momentum/angular momentum tracking.
 - Softening controls: fixed and local-density adaptive profiles for clustered interactions.
@@ -27,7 +33,6 @@ The short executable name is `nq` and the Rust crate is `nebula-quanta`.
 - Deterministic benchmarks
 - High-rate frame capture
 - Offline MP4 rendering
-- Render presets and frame-rate budget helpers
 - Memory telemetry
 - Energy/momentum diagnostics
 
@@ -44,6 +49,12 @@ cargo install --path .
 nq --mode=barnes_hut --n 10000 --steps 200 --dt 0.001 --theta 0.6 --epsilon 0.01 --g 1.0 --init plummer --mass-profile pow-law
 ```
 
+Use repository launcher defaults (frame capture + mp4 output on by default):
+
+```bash
+./run.sh
+```
+
 Local development invocation (release optimized by default):
 
 ```bash
@@ -56,12 +67,12 @@ Use a debug build when iterating quickly:
 bun run run:debug -- --mode=direct --n 1024 --steps 20 --validate --theta 0.7 --epsilon 0.01
 ```
 
-Preset launcher shortcuts from `run.ts`:
+Preset launcher shortcuts from `run.sh`:
 
 ```bash
-bun run nq -- --preset fast --n 30000 --steps 180 --mass-profile uniform --mass-alpha 1.0
-bun run nq -- --preset balanced --n 14000 --steps 280 --mass-profile pow-law --mass-alpha 2.4
-bun run nq -- --preset accurate --n 6000 --steps 350 --mass-profile lognormal --mass-mean 1.0 --mass-alpha 2.2
+./run.sh --preset fast --n 30000 --steps 180 --mass-profile uniform --mass-alpha 1.0
+./run.sh --preset balanced --n 14000 --steps 280 --mass-profile pow-law --mass-alpha 2.4
+./run.sh --preset accurate --n 6000 --steps 350 --mass-profile lognormal --mass-mean 1.0 --mass-alpha 2.2
 ```
 
 Seeded profile example with fixed momentum and a higher-order integrator:
@@ -96,24 +107,13 @@ For very long runs, reduce I/O using `--every-steps K` and keep K tuned to your 
 ffmpeg -y -framerate 60 -i capture/frame_%06d.ppm -c:v libx264 -pix_fmt yuv420p nebula-quanta-barnes_hut.mp4
 ```
 
-You can also use the repo helper:
+`./run.sh` prints the render path automatically:
 
-```bash
-scripts/render_video.sh capture nebula-quanta-barnes_hut.mp4 60 20 fast libx264
+```text
+Saving : nebula-quanta-barnes_hut.mp4
 ```
 
-```bash
-bun run render capture nebula-quanta-barnes_hut.mp4 60 20 fast libx264
-```
-
-Use one-click render profiles with estimates:
-
-```bash
-scripts/render_presets.sh ./capture nebula-quanta-barnes_hut.mp4 --preset hd60
-scripts/render_presets.sh ./capture nebula-quanta-barnes_hut-hq.mp4 --preset hq30
-```
-
-`render_presets.sh` prints estimated run duration before launching ffmpeg.
+The printed `render_cmd` contains a working `ffmpeg` invocation; override/retune it as needed.
 
 To enable the SIMD-friendly direct kernel, build/run with:
 
@@ -123,32 +123,25 @@ cargo run --release --features simd -- --mode direct --n 4096 --steps 1 --theta 
 
 ## Benchmark sweep
 
-Use the repository helper to sweep `θ` and thread counts for speed/accuracy tradeoffs:
+Use a shell loop to sweep `θ` and thread counts for speed/accuracy tradeoffs:
 
 ```bash
-scripts/bench_sweep.sh --n 20000 --steps 200 --dt 0.0008 --epsilon 0.01 --theta 0.3,0.5,0.7,1.0 --threads 1,4
+for theta in 0.3 0.5 0.7 1.0; do
+  for th in 1 4; do
+    ./run.sh --mode barnes_hut --n 20000 --steps 200 --dt 0.0008 --epsilon 0.01 \
+      --theta "$theta" --threads "$th" --energy-sample-ratio 0.0 --seed 42
+  done
+done
 ```
 
-The helper prints `nq` logs for each run so you can compare `steps_per_sec` and `ns_per_particle_force` directly.
+The run prints `nq` logs and `--csv` rows when enabled, so you can compare `steps_per_sec` and `ns_per_particle_force` directly.
 
-You can also emit structured results as CSV for downstream analysis:
-
-```bash
-scripts/bench_sweep.sh \
-  --n 20000 --steps 200 --dt 0.0008 --epsilon 0.01 \
-  --theta 0.3,0.5,0.7,1.0 --threads 1,4 --csv bench_results.csv
-```
-
-The CSV includes all parsed fields from the benchmark profile line, including timing, throughput, memory telemetry, energy, validation, and momentum diagnostics.
+The log exposes parsed perf/physics fields, including timing, throughput, memory telemetry, energy, validation, and momentum diagnostics.
 Current columns are:
 
 - `mode,n,steps,dt,theta,theta_policy,theta_density_scale,softening_policy,softening_density_scale,epsilon,g,threads,integrator,init,mass_profile,init_radius,init_spread,init_v_amp,init_lambda,init_center_x,init_center_y,mass_mean,mass_stddev,mass_min,mass_max,mass_alpha,seed,build_ms,force_ms,integrate_ms,total_ms,avg_step_ms,steps_per_sec,ns_per_particle_force,peak_nodes,node_capacity,node_utilization,workspace_bytes,bytes_per_particle,particle_bytes,node_bytes,stack_bytes,initial_ke,initial_pe,initial_te,initial_sampled_pairs,final_ke,final_pe,final_te,final_sampled_pairs,energy_drift_abs,energy_drift_rel,validate_force_rms,validate_force_max,validate_energy_abs,validate_energy_rel,p0_x,p0_y,p0_mag,lz0,p1_x,p1_y,p1_mag,lz1,dp_x,dp_y,dp_mag,dp_lz
 
-For deterministic repeatability in CI and local handoffs, use the deterministic wrapper script (seed defaults to `42` unless overridden):
-
-```bash
-scripts/bench_sweep_deterministic.sh --n 20000 --steps 200 --dt 0.0008 --epsilon 0.01 --seed 42 --theta 0.3,0.5,0.7,1.0 --threads 1,4 --mode barnes_hut --csv bench_results.csv
-```
+For deterministic replay, pass an explicit seed (for example, `--seed 42`).
 
 ## Ultra-long video-first workflow
 
@@ -165,13 +158,13 @@ The run should produce around `ceil(steps / every_steps)` frames.
 After capture, render with:
 
 ```bash
-scripts/render_video.sh ./captured_run nebula-quanta-long.mp4 30 20 slow h264_nvenc
+ffmpeg -y -framerate 30 -i captured_run/frame_%06d.ppm -c:v libx264 -pix_fmt yuv420p nebula-quanta-long.mp4
 ```
 
 `--preset` presets are defaults in the launcher and can be overridden with direct flags:
 
 ```bash
-bun run nq -- --preset fast --theta 0.35 --dt 0.0005 --threads 4
+./run.sh --preset fast --theta 0.35 --dt 0.0005 --threads 4
 ```
 
 ## CLI controls
@@ -198,7 +191,7 @@ bun run nq -- --preset fast --theta 0.35 --dt 0.0005 --threads 4
 - `--mass-max <mass max clamp>`
 - `--mass-alpha <power-law exponent>`
 - `--seed <rng seed>`
-- `--preset <fast|balanced|accurate>` (`run.ts` launch profile defaults; explicit flags override this preset)
+- `--preset <fast|balanced|accurate>` (`run.sh` launch profile defaults; explicit flags override this preset)
 - `--dim <2|3>` (2D ready; 3D is scaffolded and currently guarded)
 - `--theta-policy <fixed|local-density>` (default: `fixed`)
 - `--theta-density-scale <scale>` (larger values reduce local-density adaptation strength)
