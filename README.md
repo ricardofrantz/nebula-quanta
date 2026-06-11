@@ -220,7 +220,7 @@ ffmpeg -y -framerate 30 -i captured_run/frame_%06d.ppm -c:v libx264 -pix_fmt yuv
 - `--height <pixels>`
 - `--fps <frames per second>`
 - `--every-steps <n>` (record every nth step)
-- `--threads <n>` (Barnes–Hut force threads; use 1 for deterministic single-thread baseline)
+- `--threads <n>` (Barnes–Hut force threads; use 1 for deterministic single-thread baseline; runs below 50,000 particles intentionally use the single-thread force path, while runs at/above 50,000 particles use the scoped-thread Barnes–Hut path when `n > 1`)
 - `--max-memory-mib <size>` (hard cap on estimated workspace bytes)
 - `--csv <path>` (write benchmark summary rows to a CSV file; includes all parsed timing/metric columns)
 - `--features simd` is a Cargo build feature (pass via `cargo run/build --features simd`) that enables optional SIMD-friendly direct-force path.

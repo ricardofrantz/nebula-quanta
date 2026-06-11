@@ -10,9 +10,39 @@ use crate::{
     tree::{Node, QuadTree},
 };
 
+// 2026-06-11 measurements on the benchmark host support this crossover: a
+// one-step N=10,000 run stayed on the fallback and measured force_ms=22.204 for
+// threads=1 vs 22.399 for threads=4, while N=50,000 exercised the scoped-thread
+// path and measured force_ms=132.612 for threads=1 vs 121.301 for threads=4.
+// Production keeps --threads>1 on the single-thread traversal below 50,000
+// particles and uses the real scoped-thread implementation at/above this point,
+// where per-call spawn cost was amortized on this host.
+pub const MIN_PARALLEL_BH_PARTICLES: usize = 50_000;
+
+fn effective_bh_force_threads(
+    requested_threads: usize,
+    particle_count: usize,
+    min_parallel_particles: usize,
+) -> usize {
+    let requested_threads = requested_threads.max(1).min(particle_count.max(1));
+    if particle_count < min_parallel_particles {
+        1
+    } else {
+        requested_threads
+    }
+}
+
 pub fn compute_barnes_hut_accel_snapshot(
     particles: &ParticleSoa,
     args: &Args,
+) -> Result<(Vec<f64>, Vec<f64>), String> {
+    compute_barnes_hut_accel_snapshot_with_threshold(particles, args, MIN_PARALLEL_BH_PARTICLES)
+}
+
+fn compute_barnes_hut_accel_snapshot_with_threshold(
+    particles: &ParticleSoa,
+    args: &Args,
+    min_parallel_particles: usize,
 ) -> Result<(Vec<f64>, Vec<f64>), String> {
     let n = particles.len();
     if n == 0 {
@@ -27,8 +57,7 @@ pub fn compute_barnes_hut_accel_snapshot(
         return Ok((direct_ax, direct_ay));
     }
 
-    let thread_count = args.threads.max(1);
-    let active_threads = thread_count.min(n).max(1);
+    let active_threads = effective_bh_force_threads(args.threads, n, min_parallel_particles);
     let node_capacity = preflight_node_capacity(n)?;
     let mut tree = QuadTree::with_capacity(node_capacity);
     let mut ax = vec![0.0; n];
@@ -41,17 +70,17 @@ pub fn compute_barnes_hut_accel_snapshot(
     } else {
         Vec::new()
     };
-
     build_tree(&mut tree, particles)?;
     let effective_theta = args.theta_for_step(0, n, tree.root_bounds());
     let epsilon = args.epsilon_for_step(0, n, tree.root_bounds());
-    compute_accel_barnes_hut(
+    compute_accel_barnes_hut_with_threshold(
         particles,
         &tree,
         effective_theta,
         epsilon,
         args.g,
         active_threads,
+        min_parallel_particles,
         &mut stack,
         &mut traversal_stacks,
         &mut ax,
@@ -66,6 +95,15 @@ pub fn run_barnes_hut(
     args: &Args,
     recorder: Option<&mut FrameRecorder>,
 ) -> Result<RunStats, String> {
+    run_barnes_hut_with_threshold(particles, args, recorder, MIN_PARALLEL_BH_PARTICLES)
+}
+
+fn run_barnes_hut_with_threshold(
+    particles: &mut ParticleSoa,
+    args: &Args,
+    recorder: Option<&mut FrameRecorder>,
+    min_parallel_particles: usize,
+) -> Result<RunStats, String> {
     if particles.is_empty() {
         return Ok(RunStats::zero());
     }
@@ -75,8 +113,7 @@ pub fn run_barnes_hut(
     }
 
     let n = particles.len();
-    let thread_count = args.threads.max(1);
-    let active_threads = thread_count.min(n).max(1);
+    let active_threads = effective_bh_force_threads(args.threads, n, min_parallel_particles);
     let node_capacity = preflight_node_capacity(n)?;
     let particle_state_bytes = particle_state_bytes(n);
     let node_pool_bytes = node_pool_bytes(node_capacity);
@@ -118,13 +155,14 @@ pub fn run_barnes_hut(
     }
 
     step_start = Instant::now();
-    compute_accel_barnes_hut(
+    compute_accel_barnes_hut_with_threshold(
         particles,
         &tree,
         theta,
         epsilon,
         args.g,
         active_threads,
+        min_parallel_particles,
         &mut traversal,
         &mut traversal_stacks,
         &mut ax,
@@ -160,6 +198,7 @@ pub fn run_barnes_hut(
                     &mut rk2_ay,
                     &mut traversal,
                     &mut traversal_stacks,
+                    min_parallel_particles,
                 )?;
             }
         }
@@ -178,13 +217,14 @@ pub fn run_barnes_hut(
         }
 
         t = Instant::now();
-        compute_accel_barnes_hut(
+        compute_accel_barnes_hut_with_threshold(
             particles,
             &tree,
             theta,
             epsilon,
             args.g,
             active_threads,
+            min_parallel_particles,
             &mut traversal,
             &mut traversal_stacks,
             &mut ax,
@@ -235,6 +275,7 @@ fn integrate_rk2_step(
     mid_ay: &mut [f64],
     traversal: &mut Vec<usize>,
     traversal_stacks: &mut Vec<Vec<usize>>,
+    min_parallel_particles: usize,
 ) -> Result<(), String> {
     let n = particles.len();
     for i in 0..n {
@@ -248,13 +289,14 @@ fn integrate_rk2_step(
 
     build_tree(tree, mid_particles)?;
 
-    compute_accel_barnes_hut(
+    compute_accel_barnes_hut_with_threshold(
         mid_particles,
         tree,
         theta,
         epsilon,
         g,
         thread_count,
+        min_parallel_particles,
         traversal,
         traversal_stacks,
         mid_ax,
@@ -479,10 +521,40 @@ pub fn compute_accel_barnes_hut(
     ax: &mut [f64],
     ay: &mut [f64],
 ) -> Result<(), String> {
+    compute_accel_barnes_hut_with_threshold(
+        particles,
+        tree,
+        theta,
+        epsilon,
+        g,
+        thread_count,
+        MIN_PARALLEL_BH_PARTICLES,
+        stack,
+        thread_stacks,
+        ax,
+        ay,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn compute_accel_barnes_hut_with_threshold(
+    particles: &ParticleSoa,
+    tree: &QuadTree,
+    theta: f64,
+    epsilon: f64,
+    g: f64,
+    thread_count: usize,
+    min_parallel_particles: usize,
+    stack: &mut Vec<usize>,
+    thread_stacks: &mut Vec<Vec<usize>>,
+    ax: &mut [f64],
+    ay: &mut [f64],
+) -> Result<(), String> {
     let n = particles.len();
     if n == 0 {
         return Ok(());
     }
+    let thread_count = effective_bh_force_threads(thread_count, n, min_parallel_particles);
 
     let theta2 = theta * theta;
     let eps2 = epsilon * epsilon;
@@ -618,25 +690,34 @@ fn compute_accel_barnes_hut_parallel(
 
     let chunk_base = n / active_threads;
     let chunk_extra = n % active_threads;
-    let stack_ptr = thread_stacks.as_mut_ptr();
-    let ax_ptr = ax.as_mut_ptr();
-    let ay_ptr = ay.as_mut_ptr();
+    let chunk_lengths: Vec<usize> = (0..active_threads)
+        .map(|thread_id| chunk_base + usize::from(thread_id < chunk_extra))
+        .collect();
 
     let thread_result: Result<(), String> = std::thread::scope(|scope| {
         let mut stack_handles = Vec::with_capacity(active_threads);
-        for thread_id in 0..active_threads {
-            let chunk_len = chunk_base + usize::from(thread_id < chunk_extra);
-            let chunk_start = thread_id * chunk_base + thread_id.min(chunk_extra);
-            let local_stack = unsafe { &mut *stack_ptr.add(thread_id) };
+        let mut chunk_start = 0usize;
+        let mut ax_rest = ax;
+        let mut ay_rest = ay;
+        for ((local_stack, &chunk_len), thread_id) in thread_stacks
+            .iter_mut()
+            .take(active_threads)
+            .zip(chunk_lengths.iter())
+            .zip(0..)
+        {
             local_stack.clear();
-            let chunk_ax_ptr = unsafe { ax_ptr.add(chunk_start) } as usize;
-            let chunk_ay_ptr = unsafe { ay_ptr.add(chunk_start) } as usize;
+            let (chunk_ax, next_ax) = ax_rest.split_at_mut(chunk_len);
+            let (chunk_ay, next_ay) = ay_rest.split_at_mut(chunk_len);
+            ax_rest = next_ax;
+            ay_rest = next_ay;
+            let start = chunk_start;
+            chunk_start += chunk_len;
 
             let handle = scope.spawn(move || {
-                let chunk_ax_ptr = chunk_ax_ptr as *mut f64;
-                let chunk_ay_ptr = chunk_ay_ptr as *mut f64;
-                for offset in 0..chunk_len {
-                    let particle_idx = chunk_start + offset;
+                for (offset, (ax_slot, ay_slot)) in
+                    chunk_ax.iter_mut().zip(chunk_ay.iter_mut()).enumerate()
+                {
+                    let particle_idx = start + offset;
                     let (force_x, force_y) = compute_particle_force(
                         particle_idx,
                         particles,
@@ -646,16 +727,14 @@ fn compute_accel_barnes_hut_parallel(
                         g,
                         local_stack,
                     );
-                    unsafe {
-                        *chunk_ax_ptr.add(offset) = force_x;
-                        *chunk_ay_ptr.add(offset) = force_y;
-                    }
+                    *ax_slot = force_x;
+                    *ay_slot = force_y;
                 }
                 Ok::<(), String>(())
             });
-            stack_handles.push(handle);
+            stack_handles.push((thread_id, handle));
         }
-        for handle in stack_handles {
+        for (_thread_id, handle) in stack_handles {
             handle
                 .join()
                 .map_err(|_| "threaded Barnes-Hut force worker panicked".to_string())??;
@@ -716,7 +795,8 @@ fn traversal_stack_bytes(slots: usize, thread_count: usize) -> usize {
 mod tests {
     use super::{
         build_tree, compute_accel_barnes_hut, compute_barnes_hut_accel_snapshot,
-        preflight_node_capacity, run_barnes_hut,
+        compute_barnes_hut_accel_snapshot_with_threshold, preflight_node_capacity, run_barnes_hut,
+        run_barnes_hut_with_threshold,
     };
     use clap::Parser;
     use std::f64::consts::PI;
@@ -1387,13 +1467,16 @@ mod tests {
                 "N=4097 should exercise remainder chunk distribution for threads={threads}"
             );
 
-            let (threaded_ax, threaded_ay) =
-                compute_barnes_hut_accel_snapshot(&initial_particles, &args_threaded)?;
+            let (threaded_ax, threaded_ay) = compute_barnes_hut_accel_snapshot_with_threshold(
+                &initial_particles,
+                &args_threaded,
+                0,
+            )?;
             assert_bitwise_eq("initial ax", threads, &single_ax, &threaded_ax);
             assert_bitwise_eq("initial ay", threads, &single_ay, &threaded_ay);
 
             let mut threaded_final = initial_particles.clone();
-            run_barnes_hut(&mut threaded_final, &args_threaded, None)?;
+            run_barnes_hut_with_threshold(&mut threaded_final, &args_threaded, None, 0)?;
             assert_bitwise_eq("final x", threads, &single_final.x, &threaded_final.x);
             assert_bitwise_eq("final y", threads, &single_final.y, &threaded_final.y);
             assert_bitwise_eq("final vx", threads, &single_final.vx, &threaded_final.vx);
