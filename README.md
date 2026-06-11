@@ -1,8 +1,5 @@
 ![Nebula Quanta banner](assets/readme-banner-v1.png)
 
-[![Crates.io](https://img.shields.io/crates/v/nebula-quanta.svg)](https://crates.io/crates/nebula-quanta)
-[![Documentation](https://docs.rs/nebula-quanta/badge.svg)](https://docs.rs/nebula-quanta)
-[![CI](https://github.com/ricardofrantz/nebula-quanta/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ricardofrantz/nebula-quanta/actions)
 [![Rust 2024](https://img.shields.io/badge/Rust-2024-blue.svg)](Cargo.toml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](Cargo.toml)
 
