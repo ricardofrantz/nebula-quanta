@@ -32,8 +32,8 @@ name = "nbody"
 harness = false
 
 [features]
+unrolled = []
 default = []
-simd = []
 
 [profile.release]
 codegen-units = 1

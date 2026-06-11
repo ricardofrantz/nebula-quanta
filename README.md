@@ -128,10 +128,10 @@ Saving : nebula-quanta-barnes_hut.mp4
 
 The printed `render_cmd` contains a working `ffmpeg` invocation; override/retune it as needed.
 
-To enable the SIMD-friendly direct kernel, build/run with:
+The optional direct-force acceleration feature is named `unrolled` because it is manual 4-lane scalar unrolling, not true SIMD; in the current N=4096 direct-force bench it ran 1.11x faster than scalar (23.596 ms vs 26.299 ms median). Enable it with:
 
 ```bash
-cargo run --release --features simd -- --mode direct --n 4096 --steps 1 --theta 0
+cargo run --release --features unrolled -- --mode direct --n 4096 --steps 1 --theta 0
 ```
 
 ## Benchmark sweep
@@ -223,7 +223,7 @@ ffmpeg -y -framerate 30 -i captured_run/frame_%06d.ppm -c:v libx264 -pix_fmt yuv
 - `--threads <n>` (Barnes–Hut force threads; use 1 for deterministic single-thread baseline; runs below 50,000 particles intentionally use the single-thread force path, while runs at/above 50,000 particles use the scoped-thread Barnes–Hut path when `n > 1`)
 - `--max-memory-mib <size>` (hard cap on estimated workspace bytes)
 - `--csv <path>` (write benchmark summary rows to a CSV file; includes all parsed timing/metric columns)
-- `--features simd` is a Cargo build feature (pass via `cargo run/build --features simd`) that enables optional SIMD-friendly direct-force path.
+- `--features unrolled` is a Cargo build feature (pass via `cargo run/build --features unrolled`) that enables an optional manual 4-lane unrolled direct-force path; it is not a SIMD implementation and measured 1.11x faster than scalar at N=4096 in the current direct-force bench.
 
 ## Performance profile
 

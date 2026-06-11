@@ -15,8 +15,9 @@ What "improvement" means here, in priority order:
    actually exercises the code, and every integrator does what its name says.
 2. **Numerical validity** — convergence-order tests, energy-drift regression
    baselines, force-accuracy-vs-theta sweeps with tolerances that fail loudly.
-3. **Honest performance** — measured before optimized; a feature called
-   `simd` uses SIMD; speedups ship with an accuracy parity check.
+3. **Honest performance** — measured before optimized; features are named
+   for what they actually do (the former `simd` feature is now `unrolled`
+   for exactly this reason); speedups ship with an accuracy parity check.
 4. **Capabilities** — only after the above: 3D, more integrators, richer
    output formats.
 

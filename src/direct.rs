@@ -125,22 +125,22 @@ pub fn compute_direct_accel_with_g(
     ax: &mut [f64],
     ay: &mut [f64],
 ) {
-    #[cfg(feature = "simd")]
+    #[cfg(feature = "unrolled")]
     {
         if particles.len() >= 2048 {
-            compute_direct_accel_with_g_simd(particles, epsilon, g, ax, ay);
+            compute_direct_accel_with_g_unrolled(particles, epsilon, g, ax, ay);
         } else {
             compute_direct_accel_with_g_scalar(particles, epsilon, g, ax, ay);
         }
     }
 
-    #[cfg(not(feature = "simd"))]
+    #[cfg(not(feature = "unrolled"))]
     {
         compute_direct_accel_with_g_scalar(particles, epsilon, g, ax, ay);
     }
 }
 
-fn compute_direct_accel_with_g_scalar(
+pub fn compute_direct_accel_with_g_scalar(
     particles: &ParticleSoa,
     epsilon: f64,
     g: f64,
@@ -176,15 +176,14 @@ fn compute_direct_accel_with_g_scalar(
     }
 }
 
-#[cfg(feature = "simd")]
-fn compute_direct_accel_with_g_simd(
+pub fn compute_direct_accel_with_g_unrolled(
     particles: &ParticleSoa,
     epsilon: f64,
     g: f64,
     ax: &mut [f64],
     ay: &mut [f64],
 ) {
-    const SIMD_LANE: usize = 4;
+    const UNROLL_LANES: usize = 4;
 
     let n = particles.len();
     for i in 0..n {
@@ -199,7 +198,7 @@ fn compute_direct_accel_with_g_simd(
         let mi = particles.m[i];
         let mut j = i + 1;
 
-        while j + SIMD_LANE <= n {
+        while j + UNROLL_LANES <= n {
             let j0 = j;
             let j1 = j + 1;
             let j2 = j + 2;
@@ -245,10 +244,17 @@ fn compute_direct_accel_with_g_simd(
             let coeff_i2 = g * particles.m[j2] * inv_r3_2;
             let coeff_i3 = g * particles.m[j3] * inv_r3_3;
 
-            let cpx = coeff_i0 * dx0 + coeff_i1 * dx1 + coeff_i2 * dx2 + coeff_i3 * dx3;
-            let cpy = coeff_i0 * dy0 + coeff_i1 * dy1 + coeff_i2 * dy2 + coeff_i3 * dy3;
-            ax[i] += cpx;
-            ay[i] += cpy;
+            let cpx0 = coeff_i0 * dx0;
+            let cpy0 = coeff_i0 * dy0;
+            let cpx1 = coeff_i1 * dx1;
+            let cpy1 = coeff_i1 * dy1;
+            let cpx2 = coeff_i2 * dx2;
+            let cpy2 = coeff_i2 * dy2;
+            let cpx3 = coeff_i3 * dx3;
+            let cpy3 = coeff_i3 * dy3;
+
+            ax[i] += cpx0 + cpx1 + cpx2 + cpx3;
+            ay[i] += cpy0 + cpy1 + cpy2 + cpy3;
 
             let coeff_j = g * mi;
             if dist2_0 > 0.0 {
@@ -272,7 +278,7 @@ fn compute_direct_accel_with_g_simd(
                 ay[j3] -= c * dy3;
             }
 
-            j += SIMD_LANE;
+            j += UNROLL_LANES;
         }
 
         while j < n {
@@ -330,6 +336,124 @@ fn integrate_rk2_direct_step(
         particles.y[i] += mid_particles.vy[i] * dt;
         particles.vx[i] += mid_ax[i] * dt;
         particles.vy[i] += mid_ay[i] * dt;
+    }
+}
+
+#[cfg(all(test, feature = "unrolled"))]
+mod tests {
+    use super::*;
+    use crate::config::{InitProfile, MassProfile};
+
+    const N: usize = 4096;
+    const EPSILON: f64 = 0.01;
+    const G: f64 = 1.0;
+    const TOLERANCE: f64 = 1.0e-12;
+
+    #[derive(Debug)]
+    struct ForceDiff {
+        max_abs: f64,
+        max_normalized: f64,
+        worst_index: usize,
+        worst_scalar_ax: f64,
+        worst_scalar_ay: f64,
+        worst_diff: f64,
+    }
+
+    fn force_diff(particles: &ParticleSoa) -> ForceDiff {
+        let mut scalar_ax = vec![0.0; particles.len()];
+        let mut scalar_ay = vec![0.0; particles.len()];
+        let mut feature_ax = vec![0.0; particles.len()];
+        let mut feature_ay = vec![0.0; particles.len()];
+
+        compute_direct_accel_with_g_scalar(particles, EPSILON, G, &mut scalar_ax, &mut scalar_ay);
+        compute_direct_accel_with_g(particles, EPSILON, G, &mut feature_ax, &mut feature_ay);
+
+        let mut diff = ForceDiff {
+            max_abs: 0.0,
+            max_normalized: 0.0,
+            worst_index: 0,
+            worst_scalar_ax: 0.0,
+            worst_scalar_ay: 0.0,
+            worst_diff: 0.0,
+        };
+
+        for i in 0..particles.len() {
+            let force_scale = scalar_ax[i].hypot(scalar_ay[i]).max(1.0);
+            for (scalar_component, feature_component) in
+                [(scalar_ax[i], feature_ax[i]), (scalar_ay[i], feature_ay[i])]
+            {
+                let component_diff = (scalar_component - feature_component).abs();
+                let normalized = component_diff / force_scale;
+                diff.max_abs = diff.max_abs.max(component_diff);
+                if normalized > diff.max_normalized {
+                    diff.max_normalized = normalized;
+                    diff.worst_index = i;
+                    diff.worst_scalar_ax = scalar_ax[i];
+                    diff.worst_scalar_ay = scalar_ay[i];
+                    diff.worst_diff = component_diff;
+                }
+            }
+        }
+
+        diff
+    }
+
+    fn particles(init_profile: InitProfile, mass_profile: MassProfile, seed: u64) -> ParticleSoa {
+        ParticleSoa::random_with_profiles(
+            N,
+            seed,
+            init_profile,
+            1.0,
+            0.2,
+            0.05,
+            0.7,
+            0.0,
+            0.0,
+            mass_profile,
+            1.0,
+            0.25,
+            0.5,
+            2.0,
+            2.0,
+        )
+    }
+
+    #[test]
+    fn unrolled_force_parity_plummer_n4096() {
+        let diff = force_diff(&particles(InitProfile::Plummer, MassProfile::Uniform, 42));
+        eprintln!(
+            "unrolled plummer N=4096 max_abs_force_diff={:.6e} max_normalized_force_diff={:.6e}",
+            diff.max_abs, diff.max_normalized
+        );
+        assert!(
+            diff.max_normalized <= TOLERANCE,
+            "unrolled plummer N=4096 normalized force diff exceeded {TOLERANCE:.6e}: \
+             max_normalized={:.6e} worst_index={} scalar_ax={:.17e} scalar_ay={:.17e} diff={:.17e}",
+            diff.max_normalized,
+            diff.worst_index,
+            diff.worst_scalar_ax,
+            diff.worst_scalar_ay,
+            diff.worst_diff
+        );
+    }
+
+    #[test]
+    fn unrolled_force_parity_clustered_disk_n4096() {
+        let diff = force_diff(&particles(InitProfile::Disk, MassProfile::Lognormal, 43));
+        eprintln!(
+            "unrolled clustered/disk N=4096 max_abs_force_diff={:.6e} max_normalized_force_diff={:.6e}",
+            diff.max_abs, diff.max_normalized
+        );
+        assert!(
+            diff.max_normalized <= TOLERANCE,
+            "unrolled clustered/disk N=4096 normalized force diff exceeded {TOLERANCE:.6e}: \
+             max_normalized={:.6e} worst_index={} scalar_ax={:.17e} scalar_ay={:.17e} diff={:.17e}",
+            diff.max_normalized,
+            diff.worst_index,
+            diff.worst_scalar_ax,
+            diff.worst_scalar_ay,
+            diff.worst_diff
+        );
     }
 }
 

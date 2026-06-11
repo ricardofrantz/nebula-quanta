@@ -8,6 +8,9 @@ on:
 jobs:
   rust:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        feature_args: ["", "--features unrolled"]
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -25,13 +28,13 @@ jobs:
         run: cargo fmt --check
 
       - name: Lint
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --all-targets ${{ matrix.feature_args }} -- -D warnings
 
       - name: Build release
-        run: cargo build --release
+        run: cargo build --release ${{ matrix.feature_args }}
 
       - name: Test
-        run: cargo test
+        run: cargo test ${{ matrix.feature_args }}
 
       - name: Smoke deterministic benchmark sweep
         run: bash scripts/smoke_bench_sweep.sh

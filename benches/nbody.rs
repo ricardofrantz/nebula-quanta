@@ -1,7 +1,10 @@
 use criterion::{BatchSize, BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use nebula_quanta::{
     config::{InitProfile, MassProfile},
-    direct::compute_direct_accel,
+    direct::{
+        compute_direct_accel, compute_direct_accel_with_g_scalar,
+        compute_direct_accel_with_g_unrolled,
+    },
     particle::ParticleSoa,
     sim::{
         MIN_PARALLEL_BH_PARTICLES, build_tree, compute_accel_barnes_hut_with_threshold,
@@ -111,6 +114,31 @@ fn direct_force_eval(c: &mut Criterion) {
                 compute_direct_accel(
                     black_box(&particles),
                     black_box(EPSILON),
+                    black_box(&mut ax),
+                    black_box(&mut ay),
+                )
+            });
+        });
+    }
+
+    let n = 4_096usize;
+    let particles = plummer_particles(n);
+    for (name, kernel) in [
+        (
+            "scalar-n4096",
+            compute_direct_accel_with_g_scalar
+                as fn(&ParticleSoa, f64, f64, &mut [f64], &mut [f64]),
+        ),
+        ("unrolled-n4096", compute_direct_accel_with_g_unrolled),
+    ] {
+        group.bench_with_input(BenchmarkId::new(name, n), &n, |b, _| {
+            let mut ax = vec![0.0; n];
+            let mut ay = vec![0.0; n];
+            b.iter(|| {
+                kernel(
+                    black_box(&particles),
+                    black_box(EPSILON),
+                    black_box(G),
                     black_box(&mut ax),
                     black_box(&mut ay),
                 )

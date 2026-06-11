@@ -42,3 +42,24 @@ fallback rows match `--threads 1` within run-to-run noise.
 | one-step run | 10,000 | 4 (fallback) | 22.399 ms |
 | one-step run | 50,000 | 1 | 132.612 ms |
 | one-step run | 50,000 | 4 (scoped threads) | 121.301 ms |
+
+## Direct-force SIMD honesty decision (nebula-quanta-0nn)
+
+- Date: 2026-06-11
+- Command: `cargo bench --bench nbody -- direct`
+- Direct-force decision: Path B. The real `wide` f64x4 kernel benchmarked with `wide = "0.7.33"` was not at least 1.3x faster than the best existing path, so the misleading `simd` feature was renamed to `unrolled` and documented as manual scalar unrolling rather than SIMD. The scalar path remains the default.
+- Accuracy parity command: `cargo test --features unrolled --lib direct::tests -- --nocapture`
+- Observed feature-vs-scalar force diff: Plummer N=4096 max abs `4.274625e-11`, max normalized `2.750360e-14`; clustered/disk N=4096 max abs `8.731149e-10`, max normalized `1.880421e-14`.
+- The normalized metric divides each component diff by `max(1.0, |f_scalar|)` for that particle, making the 1e-12 bound scale with force magnitude.
+
+| Variant | N | Median |
+| --- | ---: | ---: |
+| scalar | 4,096 | 26.299 ms |
+| shipped manual unrolled | 4,096 | 23.596 ms |
+| real SIMD f64x4 (`wide` 0.7.33 trial) | 4,096 | 19.341 ms (earlier decision run) |
+
+The scalar and unrolled rows are from one back-to-back run; the `wide` trial
+median comes from the earlier decision run (scalar 21.061 ms, unrolled
+18.226 ms, f64x4 19.341 ms in that run) and is not directly comparable to the
+rows above it. Within its own run the f64x4 trial was slower than the
+unrolled kernel, which is what decided Path B.
