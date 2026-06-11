@@ -53,7 +53,7 @@ impl FrameRecorder {
     }
 
     pub fn should_record(&self, step: usize) -> bool {
-        step % self.every_steps == 0
+        step.is_multiple_of(self.every_steps)
     }
 
     pub fn record_step(
@@ -70,7 +70,7 @@ impl FrameRecorder {
         let path = self.frame_path();
         self.next_index = self.next_index.saturating_add(1);
         write_ppm(&path, self.width, self.height, &self.buffer)
-        .map_err(|err| format!("unable to write frame {}: {err}", self.next_index - 1))?;
+            .map_err(|err| format!("unable to write frame {}: {err}", self.next_index - 1))?;
         self.frame_count = self.frame_count.saturating_add(1);
         Ok(())
     }
@@ -133,9 +133,12 @@ impl FrameRecorder {
                         continue;
                     }
 
-                    let x_usize = usize::try_from(xx).map_err(|_| "x index overflow".to_string())?;
-                    let y_usize = usize::try_from(yy).map_err(|_| "y index overflow".to_string())?;
-                    let x_dim = usize::try_from(self.width).map_err(|_| "invalid frame width".to_string())?;
+                    let x_usize =
+                        usize::try_from(xx).map_err(|_| "x index overflow".to_string())?;
+                    let y_usize =
+                        usize::try_from(yy).map_err(|_| "y index overflow".to_string())?;
+                    let x_dim = usize::try_from(self.width)
+                        .map_err(|_| "invalid frame width".to_string())?;
                     let row = y_usize
                         .checked_mul(x_dim)
                         .ok_or_else(|| "render row overflow".to_string())?;
@@ -159,7 +162,10 @@ impl FrameRecorder {
 
 fn write_ppm(path: &Path, width: u32, height: u32, buffer: &[u8]) -> io::Result<()> {
     let expected = frame_byte_size(width, height).map_err(|err| {
-        io::Error::new(io::ErrorKind::InvalidInput, format!("frame size validation failed: {err}"))
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("frame size validation failed: {err}"),
+        )
     })?;
     if buffer.len() != expected {
         return Err(io::Error::new(

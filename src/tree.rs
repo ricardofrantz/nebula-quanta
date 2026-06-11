@@ -66,7 +66,8 @@ impl QuadTree {
 
     pub fn reset(&mut self, x_min: f64, x_max: f64, y_min: f64, y_max: f64) {
         self.nodes.clear();
-        self.nodes.push(Node::with_bounds(x_min, x_max, y_min, y_max));
+        self.nodes
+            .push(Node::with_bounds(x_min, x_max, y_min, y_max));
     }
 
     pub fn root_bounds(&self) -> Option<(f64, f64, f64, f64)> {
@@ -79,6 +80,9 @@ impl QuadTree {
     }
 
     pub fn can_grow(&self, additional: usize) -> bool {
-        self.nodes.len().checked_add(additional).is_some_and(|next| next <= self.capacity)
+        self.nodes
+            .len()
+            .checked_add(additional)
+            .is_some_and(|next| next <= self.capacity)
     }
 }

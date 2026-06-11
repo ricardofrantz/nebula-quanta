@@ -207,7 +207,11 @@ pub fn compute_energy_snapshot(
         kinetic,
         potential,
         total: kinetic + potential,
-        sampled_pairs: if force_exact { n.saturating_mul(n.saturating_sub(1)) / 2 } else { sampled_pair_count(n, sample_ratio) },
+        sampled_pairs: if force_exact {
+            n.saturating_mul(n.saturating_sub(1)) / 2
+        } else {
+            sampled_pair_count(n, sample_ratio)
+        },
     })
 }
 
@@ -376,6 +380,7 @@ fn sample_initial_position(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn sample_initial_velocity(
     rng: &mut ChaCha8Rng,
     profile: InitProfile,
@@ -413,7 +418,10 @@ fn sample_initial_velocity(
             let r = r2.sqrt().max(1e-12);
             let speed = amp * (1.0 / (1.0 + init_lambda * r / (radius.abs().max(1e-12)).max(1.0)));
             let angle = dy.atan2(dx);
-            (-speed * angle.sin() + jitter_x, speed * angle.cos() + jitter_y)
+            (
+                -speed * angle.sin() + jitter_x,
+                speed * angle.cos() + jitter_y,
+            )
         }
         InitProfile::Disk => {
             let dx = x - center_x;
@@ -421,7 +429,10 @@ fn sample_initial_velocity(
             let r = (dx * dx + dy * dy).sqrt().max(1e-12);
             let speed = amp / (1.0 + init_lambda * r / (radius.abs().max(1e-12)).max(1.0));
             let angle = dy.atan2(dx);
-            (-speed * angle.sin() + jitter_x, speed * angle.cos() + jitter_y)
+            (
+                -speed * angle.sin() + jitter_x,
+                speed * angle.cos() + jitter_y,
+            )
         }
         InitProfile::RotatingDisk => {
             let dx = x - center_x;
@@ -431,7 +442,10 @@ fn sample_initial_velocity(
             let softening = (1.0 + denominator).sqrt();
             let speed = amp * (1.0 + init_lambda * (1.0 / softening));
             let angle = dy.atan2(dx);
-            (-speed * angle.sin() + jitter_x, speed * angle.cos() + jitter_y)
+            (
+                -speed * angle.sin() + jitter_x,
+                speed * angle.cos() + jitter_y,
+            )
         }
         InitProfile::KeplerianDisk => {
             let dx = x - center_x;
@@ -440,7 +454,10 @@ fn sample_initial_velocity(
             let scale = (radius.abs().max(1e-12)).max(1e-12);
             let speed = amp / (1.0 + (r / scale).sqrt());
             let angle = dy.atan2(dx);
-            (-speed * angle.sin() + jitter_x, speed * angle.cos() + jitter_y)
+            (
+                -speed * angle.sin() + jitter_x,
+                speed * angle.cos() + jitter_y,
+            )
         }
     }
 }

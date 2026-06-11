@@ -336,13 +336,7 @@ mod tests {
 
     #[test]
     fn parse_init_profile_aliases() {
-        let with_alias = Args::parse_from([
-            "nq",
-            "--init",
-            "disk",
-            "--mass-profile",
-            "lognormal",
-        ]);
+        let with_alias = Args::parse_from(["nq", "--init", "disk", "--mass-profile", "lognormal"]);
         assert_eq!(with_alias.init, InitProfile::Disk);
         assert_eq!(with_alias.mass_profile, MassProfile::Lognormal);
     }
@@ -364,11 +358,7 @@ mod tests {
         assert_eq!(args.dim, Dimensionality::Three);
         assert_eq!(args.theta_policy, ThetaPolicy::LocalDensity);
         assert!((args.theta_density_scale - 64.0).abs() < f64::EPSILON);
-        let adaptive_theta = args.theta_for_step(
-            0,
-            1000,
-            Some((-1.0, 1.0, -2.0, 2.0)),
-        );
+        let adaptive_theta = args.theta_for_step(0, 1000, Some((-1.0, 1.0, -2.0, 2.0)));
         assert!(adaptive_theta < 0.7);
         assert!(adaptive_theta >= (0.7_f64 * 0.05).max(1.0e-4));
         assert_eq!(args.theta_for_step(0, 1000, None), 0.7);
@@ -392,28 +382,19 @@ mod tests {
             "64.0",
         ]);
 
-        assert_eq!(adaptive_args.softening_policy, SofteningPolicy::LocalDensity);
-        assert!((adaptive_args.softening_density_scale - 64.0).abs() < f64::EPSILON);
-        let adaptive_epsilon = adaptive_args.epsilon_for_step(
-            0,
-            1000,
-            Some((-1.0, 1.0, -1.0, 1.0)),
+        assert_eq!(
+            adaptive_args.softening_policy,
+            SofteningPolicy::LocalDensity
         );
+        assert!((adaptive_args.softening_density_scale - 64.0).abs() < f64::EPSILON);
+        let adaptive_epsilon =
+            adaptive_args.epsilon_for_step(0, 1000, Some((-1.0, 1.0, -1.0, 1.0)));
         assert!(adaptive_epsilon > adaptive_args.epsilon);
 
-        let fixed_args = Args::parse_from([
-            "nq",
-            "--epsilon",
-            "0.02",
-            "--softening-policy",
-            "fixed",
-        ]);
+        let fixed_args =
+            Args::parse_from(["nq", "--epsilon", "0.02", "--softening-policy", "fixed"]);
         assert_eq!(
-            fixed_args.epsilon_for_step(
-                0,
-                1000,
-                Some((-1.0, 1.0, -1.0, 1.0)),
-            ),
+            fixed_args.epsilon_for_step(0, 1000, Some((-1.0, 1.0, -1.0, 1.0)),),
             0.02
         );
     }

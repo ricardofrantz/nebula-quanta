@@ -5,7 +5,7 @@ use crate::{
     config::Args,
     direct::{compute_direct_accel_with_g, run_direct as run_direct_reference},
     frame::FrameRecorder,
-    particle::{particle_bounds, ParticleSoa},
+    particle::{ParticleSoa, particle_bounds},
     stats::RunStats,
     tree::{Node, QuadTree},
 };
@@ -35,7 +35,9 @@ pub fn compute_barnes_hut_accel_snapshot(
     let mut ay = vec![0.0; n];
     let mut stack = Vec::with_capacity(node_capacity);
     let mut traversal_stacks: Vec<Vec<usize>> = if active_threads > 1 {
-        (0..active_threads).map(|_| Vec::with_capacity(node_capacity)).collect()
+        (0..active_threads)
+            .map(|_| Vec::with_capacity(node_capacity))
+            .collect()
     } else {
         Vec::new()
     };
@@ -87,7 +89,9 @@ pub fn run_barnes_hut(
     let mut ay = vec![0.0; n];
     let mut traversal = Vec::with_capacity(node_capacity);
     let mut traversal_stacks: Vec<Vec<usize>> = if active_threads > 1 {
-        (0..active_threads).map(|_| Vec::with_capacity(node_capacity)).collect()
+        (0..active_threads)
+            .map(|_| Vec::with_capacity(node_capacity))
+            .collect()
     } else {
         Vec::new()
     };
@@ -107,10 +111,10 @@ pub fn run_barnes_hut(
     build_tree(&mut tree, particles)?;
     peak_node_count = peak_node_count.max(tree.nodes.len());
     build_elapsed += step_start.elapsed().as_secs_f64() * 1000.0;
-    if let Some(recorder) = recorder.as_deref_mut() {
-        if let Some(bounds) = tree.root_bounds() {
-            recorder.record_step(0, particles, bounds)?;
-        }
+    if let Some(recorder) = recorder.as_deref_mut()
+        && let Some(bounds) = tree.root_bounds()
+    {
+        recorder.record_step(0, particles, bounds)?;
     }
 
     step_start = Instant::now();
@@ -167,10 +171,10 @@ pub fn run_barnes_hut(
         build_elapsed += t.elapsed().as_secs_f64() * 1000.0;
         theta = args.theta_for_step(step + 1, n, tree.root_bounds());
         epsilon = args.epsilon_for_step(step + 1, n, tree.root_bounds());
-        if let Some(recorder) = recorder.as_deref_mut() {
-            if let Some(bounds) = tree.root_bounds() {
-                recorder.record_step(step + 1, particles, bounds)?;
-            }
+        if let Some(recorder) = recorder.as_deref_mut()
+            && let Some(bounds) = tree.root_bounds()
+        {
+            recorder.record_step(step + 1, particles, bounds)?;
         }
 
         t = Instant::now();
@@ -215,6 +219,7 @@ pub fn run_barnes_hut(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn integrate_rk2_step(
     particles: &mut ParticleSoa,
     tree: &mut QuadTree,
@@ -294,13 +299,12 @@ fn build_tree(tree: &mut QuadTree, particles: &ParticleSoa) -> Result<(), String
     }
 
     let spread = (x_max - x_min).max(y_max - y_min);
-    let pad = if spread == 0.0 { 1.0e-6 } else { spread * 1e-12 };
-    tree.reset(
-        x_min - pad,
-        x_max + pad,
-        y_min - pad,
-        y_max + pad,
-    );
+    let pad = if spread == 0.0 {
+        1.0e-6
+    } else {
+        spread * 1e-12
+    };
+    tree.reset(x_min - pad, x_max + pad, y_min - pad, y_max + pad);
 
     for i in 0..n {
         insert_into_node(tree, particles, 0, i)?;
@@ -354,14 +358,19 @@ fn insert_into_node(
 
         tree.nodes[node_idx].body_idx = -1;
 
-        insert_into_node(tree, particles, child_indices[choose_child(
-            tree.nodes[node_idx].x_min,
-            tree.nodes[node_idx].x_max,
-            tree.nodes[node_idx].y_min,
-            tree.nodes[node_idx].y_max,
-            particles.x[existing_body],
-            particles.y[existing_body],
-        )?] as usize, existing_body)?;
+        insert_into_node(
+            tree,
+            particles,
+            child_indices[choose_child(
+                tree.nodes[node_idx].x_min,
+                tree.nodes[node_idx].x_max,
+                tree.nodes[node_idx].y_min,
+                tree.nodes[node_idx].y_max,
+                particles.x[existing_body],
+                particles.y[existing_body],
+            )?] as usize,
+            existing_body,
+        )?;
         insert_into_node(
             tree,
             particles,
@@ -433,7 +442,14 @@ fn split_leaf(tree: &mut QuadTree, node_idx: usize) -> Result<(), String> {
     Ok(())
 }
 
-fn choose_child(x_min: f64, x_max: f64, y_min: f64, y_max: f64, x: f64, y: f64) -> Result<usize, String> {
+fn choose_child(
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+    x: f64,
+    y: f64,
+) -> Result<usize, String> {
     let x_mid = 0.5 * (x_min + x_max);
     let y_mid = 0.5 * (y_min + y_max);
 
@@ -448,6 +464,7 @@ fn choose_child(x_min: f64, x_max: f64, y_min: f64, y_max: f64, x: f64, y: f64) 
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn compute_accel_barnes_hut(
     particles: &ParticleSoa,
     tree: &QuadTree,
@@ -470,15 +487,8 @@ fn compute_accel_barnes_hut(
 
     if thread_count <= 1 {
         for i in 0..n {
-            let (force_x, force_y) = compute_particle_force(
-                i,
-                particles,
-                &tree.nodes,
-                theta2,
-                eps2,
-                g,
-                stack,
-            );
+            let (force_x, force_y) =
+                compute_particle_force(i, particles, &tree.nodes, theta2, eps2, g, stack);
             ax[i] = force_x;
             ay[i] = force_y;
         }
@@ -563,6 +573,7 @@ fn compute_particle_force(
     (force_x, force_y)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn compute_accel_barnes_hut_parallel(
     particles: &ParticleSoa,
     nodes: &[Node],
@@ -583,7 +594,8 @@ fn compute_accel_barnes_hut_parallel(
     let active_threads = thread_count.min(n);
     if active_threads <= 1 {
         for i in 0..n {
-            let (force_x, force_y) = compute_particle_force(i, particles, nodes, theta2, eps2, g, stack);
+            let (force_x, force_y) =
+                compute_particle_force(i, particles, nodes, theta2, eps2, g, stack);
             ax[i] = force_x;
             ay[i] = force_y;
         }
@@ -592,9 +604,9 @@ fn compute_accel_barnes_hut_parallel(
 
     let stack_capacity = stack.capacity().max(1);
     if thread_stacks.len() < active_threads {
-        thread_stacks.extend((thread_stacks.len()..active_threads).map(|_| {
-            Vec::with_capacity(stack_capacity)
-        }));
+        thread_stacks.extend(
+            (thread_stacks.len()..active_threads).map(|_| Vec::with_capacity(stack_capacity)),
+        );
     }
     for thread_stack in thread_stacks.iter_mut().take(active_threads) {
         if thread_stack.capacity() < stack_capacity {
@@ -613,7 +625,7 @@ fn compute_accel_barnes_hut_parallel(
         for thread_id in 0..active_threads {
             let chunk_len = chunk_base + usize::from(thread_id < chunk_extra);
             let chunk_start = thread_id * chunk_base + thread_id.min(chunk_extra);
-            let mut local_stack = unsafe { &mut *stack_ptr.add(thread_id) };
+            let local_stack = unsafe { &mut *stack_ptr.add(thread_id) };
             local_stack.clear();
             let chunk_ax_ptr = unsafe { ax_ptr.add(chunk_start) } as usize;
             let chunk_ay_ptr = unsafe { ay_ptr.add(chunk_start) } as usize;
@@ -630,7 +642,7 @@ fn compute_accel_barnes_hut_parallel(
                         theta2,
                         eps2,
                         g,
-                        &mut local_stack,
+                        local_stack,
                     );
                     unsafe {
                         *chunk_ax_ptr.add(offset) = force_x;
@@ -670,7 +682,9 @@ fn check_memory_budget(args: &Args, workspace_bytes: usize) -> Result<(), String
     };
 
     let max_memory_bytes = max_memory_mib.checked_mul(1024 * 1024).ok_or_else(|| {
-        format!("invalid --max-memory-mib value (overflow while converting to bytes): {max_memory_mib}")
+        format!(
+            "invalid --max-memory-mib value (overflow while converting to bytes): {max_memory_mib}"
+        )
     })?;
     if workspace_bytes > max_memory_bytes {
         return Err(format!(
@@ -698,15 +712,13 @@ fn traversal_stack_bytes(slots: usize, thread_count: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        build_tree,
-        compute_accel_barnes_hut,
-        preflight_node_capacity,
-        run_barnes_hut,
-    };
+    use super::{build_tree, compute_accel_barnes_hut, preflight_node_capacity, run_barnes_hut};
     use clap::Parser;
 
-    use crate::{config::Args, direct::compute_direct_accel_with_g, direct::run_direct, particle::ParticleSoa, tree::QuadTree};
+    use crate::{
+        config::Args, direct::compute_direct_accel_with_g, direct::run_direct,
+        particle::ParticleSoa, tree::QuadTree,
+    };
 
     #[test]
     fn rk2_integration_matches_direct_when_treated_as_direct() -> Result<(), String> {
@@ -838,7 +850,13 @@ mod tests {
 
         let mut direct_ax = vec![0.0; n];
         let mut direct_ay = vec![0.0; n];
-        compute_direct_accel_with_g(&particles, args.epsilon, args.g, &mut direct_ax, &mut direct_ay);
+        compute_direct_accel_with_g(
+            &particles,
+            args.epsilon,
+            args.g,
+            &mut direct_ax,
+            &mut direct_ay,
+        );
 
         for i in 0..n {
             let dx = (bh_ax[i] - direct_ax[i]).abs();

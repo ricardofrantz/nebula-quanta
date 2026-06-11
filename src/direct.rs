@@ -4,7 +4,7 @@ use std::time::Instant;
 use crate::{
     config::Args,
     frame::FrameRecorder,
-    particle::{particle_bounds, ParticleSoa},
+    particle::{ParticleSoa, particle_bounds},
     stats::RunStats,
 };
 
@@ -78,11 +78,7 @@ pub fn run_direct(
         }
 
         t = Instant::now();
-        epsilon = args.epsilon_for_step(
-            step + 1,
-            n,
-            particle_bounds(particles).ok(),
-        );
+        epsilon = args.epsilon_for_step(step + 1, n, particle_bounds(particles).ok());
         if g_is_unity {
             compute_direct_accel(particles, epsilon, &mut ax, &mut ay);
         } else {
@@ -302,6 +298,7 @@ fn compute_direct_accel_with_g_simd(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn integrate_rk2_direct_step(
     particles: &mut ParticleSoa,
     mid_particles: &mut ParticleSoa,
@@ -344,7 +341,9 @@ fn check_memory_budget(args: &Args, workspace_bytes: usize) -> Result<(), String
     };
 
     let max_memory_bytes = max_memory_mib.checked_mul(1024 * 1024).ok_or_else(|| {
-        format!("invalid --max-memory-mib value (overflow while converting to bytes): {max_memory_mib}")
+        format!(
+            "invalid --max-memory-mib value (overflow while converting to bytes): {max_memory_mib}"
+        )
     })?;
     if workspace_bytes > max_memory_bytes {
         return Err(format!(

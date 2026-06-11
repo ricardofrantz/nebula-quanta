@@ -6,31 +6,32 @@ on:
   pull_request:
 
 jobs:
-  docs-sanity:
+  rust:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
-      - name: Verify required repository files
-        run: |
-          required=(README.md SPEC.md plan.md plan_2026-02-16.md)
-          for file in "${required[@]}"; do
-            if [ ! -f "$file" ]; then
-              echo "::error file=$file::Required file missing: $file"
-              exit 1
-            fi
-          done
-          echo "Required files present."
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
 
-      - name: Verify project name mention in README
-        run: |
-          if ! grep -qi "nebula-quanta" README.md; then
-            echo "::error file=README.md::README should reference the repo name nebula-quanta"
-            exit 1
-          fi
-          echo "README repo name check passed."
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
 
-      - name: Smoke deterministic benchmark sweep with CSV output
-        run: |
-          bash scripts/smoke_bench_sweep.sh
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Lint
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Test
+        run: cargo test
+
+      - name: Smoke deterministic benchmark sweep
+        run: bash scripts/smoke_bench_sweep.sh

@@ -2,22 +2,18 @@ use clap::Parser;
 
 mod config;
 mod direct;
+mod frame;
 mod particle;
 mod sim;
 mod stats;
-mod frame;
 mod tree;
 
 use config::Args;
 use config::Dimensionality;
-use frame::FrameRecorder;
 use direct::{compute_direct_accel_with_g, run_direct};
+use frame::FrameRecorder;
 use particle::{
-    compute_energy_snapshot,
-    particle_bounds,
-    total_momentum,
-    EnergySnapshot,
-    ParticleSoa,
+    EnergySnapshot, ParticleSoa, compute_energy_snapshot, particle_bounds, total_momentum,
 };
 use std::path::PathBuf;
 
@@ -54,7 +50,8 @@ fn main() {
         args.mass_max,
         args.mass_alpha,
     );
-    let initial_epsilon = args.epsilon_for_step(0, particles.len(), particle_bounds(&particles).ok());
+    let initial_epsilon =
+        args.epsilon_for_step(0, particles.len(), particle_bounds(&particles).ok());
     let initial_energy = if args.should_measure_energy_snapshot() {
         compute_energy_snapshot(
             &particles,
@@ -89,12 +86,13 @@ fn main() {
             sim::run_barnes_hut(&mut particles, &args, recorder.as_mut())
                 .map(|stats| ("barnes_hut".to_string(), stats))
         }
-        "direct" => {
-            run_direct(&mut particles, &args, recorder.as_mut())
-                .map(|stats| ("direct".to_string(), stats))
-        }
+        "direct" => run_direct(&mut particles, &args, recorder.as_mut())
+            .map(|stats| ("direct".to_string(), stats)),
         other => {
-            eprintln!("unknown mode: {}. use --mode=barnes_hut or --mode=direct", other);
+            eprintln!(
+                "unknown mode: {}. use --mode=barnes_hut or --mode=direct",
+                other
+            );
             return;
         }
     };
@@ -233,17 +231,17 @@ fn main() {
                 delta_lz,
             );
 
-            if let Some(recorder) = recorder.as_ref() {
-                if recorder.frame_count() > 0 {
-                    let output_name = PathBuf::from(format!("nebula-quanta-{}.mp4", mode_name))
-                        .to_string_lossy()
-                        .into_owned();
-                    println!(
-                        "record_frames={} render_cmd=\"{}\"",
-                        recorder.frame_count(),
-                        recorder.render_command(&output_name, args.fps),
-                    );
-                }
+            if let Some(recorder) = recorder.as_ref()
+                && recorder.frame_count() > 0
+            {
+                let output_name = PathBuf::from(format!("nebula-quanta-{}.mp4", mode_name))
+                    .to_string_lossy()
+                    .into_owned();
+                println!(
+                    "record_frames={} render_cmd=\"{}\"",
+                    recorder.frame_count(),
+                    recorder.render_command(&output_name, args.fps),
+                );
             }
         }
         Err(err) => {
@@ -259,10 +257,7 @@ fn should_validate(args: &Args) -> bool {
 
     let mode_hint = args.mode.to_lowercase();
 
-    if mode_hint != "barnes_hut"
-        && mode_hint != "barneshut"
-        && mode_hint != "bh"
-    {
+    if mode_hint != "barnes_hut" && mode_hint != "barneshut" && mode_hint != "bh" {
         return false;
     }
 
@@ -316,25 +311,10 @@ fn validate_against_direct(
     }
 
     let (rms_pos, rms_vel, max_pos, max_vel) = compare_states(fast, &ref_particles);
-    let seed = args
-        .seed
-        .wrapping_add(0x9E3779B97F4A7C15);
-    let fast_energy = compute_energy_snapshot(
-        fast,
-        final_epsilon,
-        args.g,
-        0.0,
-        true,
-        seed,
-    );
-    let direct_energy = compute_energy_snapshot(
-        &ref_particles,
-        final_epsilon,
-        args.g,
-        0.0,
-        true,
-        seed,
-    );
+    let seed = args.seed.wrapping_add(0x9E3779B97F4A7C15);
+    let fast_energy = compute_energy_snapshot(fast, final_epsilon, args.g, 0.0, true, seed);
+    let direct_energy =
+        compute_energy_snapshot(&ref_particles, final_epsilon, args.g, 0.0, true, seed);
     let (energy_abs, energy_rel) = match (fast_energy, direct_energy) {
         (Some(current), Some(reference)) => {
             let abs = (current.total - reference.total).abs();
@@ -453,5 +433,10 @@ fn compare_states(a: &ParticleSoa, b: &ParticleSoa) -> (f64, f64, f64, f64) {
     }
 
     let denom = (n as f64).max(1.0);
-    ((sum_pos / denom).sqrt(), (sum_vel / denom).sqrt(), max_pos, max_vel)
+    (
+        (sum_pos / denom).sqrt(),
+        (sum_vel / denom).sqrt(),
+        max_pos,
+        max_vel,
+    )
 }
