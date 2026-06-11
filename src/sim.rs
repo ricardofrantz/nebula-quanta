@@ -352,13 +352,7 @@ fn insert_into_node(
 
         let child_indices = tree.nodes[node_idx].children;
 
-        {
-            let node = &mut tree.nodes[node_idx];
-            node.mass = 0.0;
-            node.com_x = 0.0;
-            node.com_y = 0.0;
-            node.body_idx = -1;
-        }
+        tree.nodes[node_idx].body_idx = -1;
 
         insert_into_node(tree, particles, child_indices[choose_child(
             tree.nodes[node_idx].x_min,
@@ -746,7 +740,7 @@ mod tests {
             ])
         };
 
-        let mut particles = ParticleSoa::random_with_profiles(
+        let particles = ParticleSoa::random_with_profiles(
             128,
             2026,
             parse("0").init,
@@ -766,7 +760,7 @@ mod tests {
         let mut barnes = particles.clone();
         let mut direct = particles.clone();
 
-        let mut args = parse("0.0");
+        let args = parse("0.0");
         let node_capacity = preflight_node_capacity(args.n)?;
         assert!(node_capacity > 0);
 
@@ -805,7 +799,7 @@ mod tests {
             "--seed",
             "777",
         ]);
-        let mut particles = ParticleSoa::random_with_profiles(
+        let particles = ParticleSoa::random_with_profiles(
             n,
             args.seed,
             args.init,
