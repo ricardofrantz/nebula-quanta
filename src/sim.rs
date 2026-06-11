@@ -710,6 +710,8 @@ mod tests {
         preflight_node_capacity,
         run_barnes_hut,
     };
+    use clap::Parser;
+
     use crate::{config::Args, direct::compute_direct_accel_with_g, direct::run_direct, particle::ParticleSoa, tree::QuadTree};
 
     #[test]

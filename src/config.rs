@@ -305,8 +305,7 @@ mod tests {
             "0.1",
             "--init-lambda",
             "2.0",
-            "--init-center-x",
-            "-0.3",
+            "--init-center-x=-0.3",
             "--init-center-y",
             "0.4",
             "--mass-profile",
@@ -371,7 +370,7 @@ mod tests {
             Some((-1.0, 1.0, -2.0, 2.0)),
         );
         assert!(adaptive_theta < 0.7);
-        assert!(adaptive_theta >= (0.7 * 0.05).max(1.0e-4));
+        assert!(adaptive_theta >= (0.7_f64 * 0.05).max(1.0e-4));
         assert_eq!(args.theta_for_step(0, 1000, None), 0.7);
 
         let fixed_args = Args::parse_from(["nq", "--theta-policy", "fixed", "--theta", "0.6"]);
