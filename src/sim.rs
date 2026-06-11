@@ -739,6 +739,9 @@ mod tests {
     const ENERGY_REGRESSION_DT: f64 = 0.001;
     const ENERGY_REGRESSION_THETA: f64 = 0.5;
     const ENERGY_REGRESSION_EPSILON: f64 = 0.01;
+    const THETA_ACCURACY_N: usize = 1024;
+    const THETA_ACCURACY_EPSILON: f64 = 0.01;
+    const THETA_ACCURACY_VALUES: [f64; 4] = [0.3, 0.5, 0.7, 1.0];
 
     #[derive(Clone, Copy)]
     struct KeplerCase {
@@ -954,6 +957,100 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    fn theta_accuracy_args(init: &str, theta: f64) -> Args {
+        let n_s = THETA_ACCURACY_N.to_string();
+        let theta_s = theta.to_string();
+        let epsilon_s = THETA_ACCURACY_EPSILON.to_string();
+
+        Args::parse_from([
+            "nq",
+            "--n",
+            n_s.as_str(),
+            "--init",
+            init,
+            "--steps",
+            "0",
+            "--theta",
+            theta_s.as_str(),
+            "--epsilon",
+            epsilon_s.as_str(),
+            "--seed",
+            "42",
+            "--threads",
+            "1",
+        ])
+    }
+
+    fn relative_force_rms_error(init: &str, theta: f64) -> Result<f64, String> {
+        let args = theta_accuracy_args(init, theta);
+        let particles = regression_particles(&args);
+        let (bh_ax, bh_ay) = super::compute_barnes_hut_accel_snapshot(&particles, &args)?;
+        let mut direct_ax = vec![0.0; particles.len()];
+        let mut direct_ay = vec![0.0; particles.len()];
+        compute_direct_accel_with_g(
+            &particles,
+            THETA_ACCURACY_EPSILON,
+            args.g,
+            &mut direct_ax,
+            &mut direct_ay,
+        );
+
+        let mut error_sum = 0.0;
+        let mut reference_sum = 0.0;
+        for i in 0..particles.len() {
+            let dx = bh_ax[i] - direct_ax[i];
+            let dy = bh_ay[i] - direct_ay[i];
+            error_sum += dx * dx + dy * dy;
+            reference_sum += direct_ax[i] * direct_ax[i] + direct_ay[i] * direct_ay[i];
+        }
+
+        if reference_sum <= f64::EPSILON {
+            return Err(format!(
+                "direct-force reference norm vanished for init={init} theta={theta}; relative RMS undefined"
+            ));
+        }
+        Ok((error_sum / reference_sum).sqrt())
+    }
+
+    fn theta_accuracy_errors(init: &str) -> Result<[f64; 4], String> {
+        let mut errors = [0.0; 4];
+        for (idx, theta) in THETA_ACCURACY_VALUES.iter().copied().enumerate() {
+            errors[idx] = relative_force_rms_error(init, theta)?;
+            eprintln!(
+                "theta_accuracy init={} theta={:.1} relative_force_rms_error={:.15}",
+                init, theta, errors[idx]
+            );
+        }
+        Ok(errors)
+    }
+
+    fn assert_monotone_non_decreasing(init: &str, errors: &[f64; 4]) {
+        for idx in 1..errors.len() {
+            assert!(
+                errors[idx] > errors[idx - 1],
+                "theta accuracy init={} is not strictly increasing: theta {} error {} <= theta {} error {}",
+                init,
+                THETA_ACCURACY_VALUES[idx],
+                errors[idx],
+                THETA_ACCURACY_VALUES[idx - 1],
+                errors[idx - 1]
+            );
+        }
+    }
+
+    fn assert_theta_ceilings(init: &str, errors: &[f64; 4], ceilings: [f64; 4]) {
+        for (idx, (error, ceiling)) in errors.iter().zip(ceilings).enumerate() {
+            assert!(
+                *error <= ceiling,
+                "theta accuracy init={} theta={} relative force RMS error {} exceeds {}",
+                init,
+                THETA_ACCURACY_VALUES[idx],
+                error,
+                ceiling
+            );
+        }
     }
 
     fn max_position_error(particles: &ParticleSoa, expected: [(f64, f64); 2]) -> f64 {
@@ -1216,6 +1313,48 @@ mod tests {
             exponent_01, exponent_12, average_exponent
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn barnes_hut_theta_accuracy_plummer_seed_42_regression() -> Result<(), String> {
+        let errors = theta_accuracy_errors("plummer")?;
+        assert_monotone_non_decreasing("plummer", &errors);
+        // Baselines measured 2026-06-11 for N=1024, seed=42, epsilon=0.01,
+        // threads=1: theta=[0.3, 0.5, 0.7, 1.0] relative force RMS errors
+        // [0.003109613705270, 0.009368051830462, 0.032234402265279,
+        // 0.080799996016145]; ceilings are 3x baseline.
+        assert_theta_ceilings(
+            "plummer",
+            &errors,
+            [
+                0.009328841115811,
+                0.028104155491386,
+                0.096703206795837,
+                0.242399988048435,
+            ],
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn barnes_hut_theta_accuracy_rotating_disk_seed_42_regression() -> Result<(), String> {
+        let errors = theta_accuracy_errors("rotating-disk")?;
+        assert_monotone_non_decreasing("rotating-disk", &errors);
+        // Baselines measured 2026-06-11 for N=1024, seed=42, epsilon=0.01,
+        // threads=1: theta=[0.3, 0.5, 0.7, 1.0] relative force RMS errors
+        // [0.002653372755433, 0.011713759891357, 0.027360719144725,
+        // 0.064170371401803]; ceilings are 3x baseline.
+        assert_theta_ceilings(
+            "rotating-disk",
+            &errors,
+            [
+                0.007960118266299,
+                0.035141279674071,
+                0.082082157434175,
+                0.192511114205409,
+            ],
+        );
         Ok(())
     }
 
