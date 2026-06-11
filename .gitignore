@@ -4,3 +4,14 @@
 /captured_run
 /captured_run*/
 /captured_run*.mp4
+
+# bv (beads viewer) local config and caches
+.bv/
+docs/goals.md
+docs/goals-ledger.md
+.sc/
+
+# supervised-process artifacts (private)
+.beads/
+plan.md
+docs/improve-ledger.md

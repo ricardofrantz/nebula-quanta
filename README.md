@@ -1,14 +1,17 @@
-# Nebula Quanta
+![Nebula Quanta banner](assets/readme-banner-v1.png)
+
+[![Crates.io](https://img.shields.io/crates/v/nebula-quanta.svg)](https://crates.io/crates/nebula-quanta)
+[![Documentation](https://docs.rs/nebula-quanta/badge.svg)](https://docs.rs/nebula-quanta)
+[![CI](https://github.com/ricardofrantz/nebula-quanta/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ricardofrantz/nebula-quanta/actions)
+[![Rust 2024](https://img.shields.io/badge/Rust-2024-blue.svg)](Cargo.toml)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](Cargo.toml)
 
 [![Watch the simulation](./nebula-quanta-barnes_hut.gif)](./nebula-quanta-barnes_hut.mp4)
 
 [Download MP4](./nebula-quanta-barnes_hut.mp4)
 
-![CI](https://github.com/ricardofrantz/nebula-quanta/actions/workflows/ci.yml/badge.svg?branch=main)
-[![Crates.io](https://img.shields.io/crates/v/nebula-quanta.svg)](https://crates.io/crates/nebula-quanta)
-
 `nq` is a focused Barnes–Hut N-body simulation CLI in Rust.
-It is engineered for fast, memory-frugal runs with a deterministic direct-force baseline.
+It is built for fast, memory-frugal runs with a deterministic direct-force baseline.
 The short executable name is `nq` and the Rust crate is `nebula-quanta`.
 
 ## About
@@ -51,12 +54,12 @@ Use repository launcher defaults (frame capture + mp4 output on by default):
 
 ```bash
 ./run.sh
+```
 
 Generate an animated GIF preview instead of only MP4:
 
 ```bash
 ./run.sh --gif
-```
 ```
 
 Local development invocation (release optimized by default):
