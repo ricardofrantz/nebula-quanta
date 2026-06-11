@@ -14,6 +14,7 @@ pub struct FrameRecorder {
     background: [u8; 3],
     buffer: Vec<u8>,
     point_radius: i32,
+    trail_decay: f32,
     frame_count: usize,
 }
 
@@ -37,7 +38,7 @@ impl FrameRecorder {
         let height = args.height;
         let buffer_len = frame_byte_size(width, height)?;
         let background = [6, 10, 16];
-        let point_radius = 1;
+        let point_radius = 2;
 
         Ok(Self {
             frame_dir,
@@ -48,6 +49,7 @@ impl FrameRecorder {
             background,
             buffer: vec![0; buffer_len],
             point_radius,
+            trail_decay: 0.88,
             frame_count: 0,
         })
     }
@@ -96,22 +98,31 @@ impl FrameRecorder {
         path
     }
 
+    fn decay_trails(&mut self) {
+        for pixel in self.buffer.chunks_exact_mut(3) {
+            pixel[0] = decayed_channel(pixel[0], self.background[0], self.trail_decay);
+            pixel[1] = decayed_channel(pixel[1], self.background[1], self.trail_decay);
+            pixel[2] = decayed_channel(pixel[2], self.background[2], self.trail_decay);
+        }
+    }
+
     fn render_particles(
         &mut self,
         particles: &ParticleSoa,
         bounds: (f64, f64, f64, f64),
     ) -> Result<(), String> {
-        for pixel in self.buffer.chunks_exact_mut(3) {
-            pixel[0] = self.background[0];
-            pixel[1] = self.background[1];
-            pixel[2] = self.background[2];
-        }
+        self.decay_trails();
 
         let (x_min, x_max, y_min, y_max) = bounds;
         let width = f64::from(self.width);
         let height = f64::from(self.height);
         let sx = (width - 1.0) / (x_max - x_min).max(1e-12);
         let sy = (height - 1.0) / (y_max - y_min).max(1e-12);
+        let x_dim = usize::try_from(self.width).map_err(|_| "invalid frame width".to_string())?;
+        let w = i64::from(self.width);
+        let h = i64::from(self.height);
+        let speed_scale = speed_scale(particles);
+        let glow_kernel = glow_kernel(self.point_radius);
 
         for i in 0..particles.len() {
             let x = particles.x[i];
@@ -122,41 +133,100 @@ impl FrameRecorder {
 
             let px = ((x - x_min) * sx).round() as i64;
             let py = ((y_max - y) * sy).round() as i64;
-            let w = i64::from(self.width);
-            let h = i64::from(self.height);
+            let speed =
+                (particles.vx[i] * particles.vx[i] + particles.vy[i] * particles.vy[i]).sqrt();
+            let color = speed_color(speed, speed_scale);
 
-            for dy in -self.point_radius..=self.point_radius {
-                for dx in -self.point_radius..=self.point_radius {
-                    let xx = px + i64::from(dx);
-                    let yy = py + i64::from(dy);
-                    if xx < 0 || xx >= w || yy < 0 || yy >= h {
-                        continue;
-                    }
-
-                    let x_usize =
-                        usize::try_from(xx).map_err(|_| "x index overflow".to_string())?;
-                    let y_usize =
-                        usize::try_from(yy).map_err(|_| "y index overflow".to_string())?;
-                    let x_dim = usize::try_from(self.width)
-                        .map_err(|_| "invalid frame width".to_string())?;
-                    let row = y_usize
-                        .checked_mul(x_dim)
-                        .ok_or_else(|| "render row overflow".to_string())?;
-                    let idx = row
-                        .checked_add(x_usize)
-                        .and_then(|p| p.checked_mul(3))
-                        .ok_or_else(|| "render pixel overflow".to_string())?;
-                    if idx + 2 >= self.buffer.len() {
-                        continue;
-                    }
-                    self.buffer[idx] = 255;
-                    self.buffer[idx + 1] = 255;
-                    self.buffer[idx + 2] = 255;
+            for &(dx, dy, falloff) in &glow_kernel {
+                let xx = px + i64::from(dx);
+                let yy = py + i64::from(dy);
+                if xx < 0 || xx >= w || yy < 0 || yy >= h {
+                    continue;
                 }
+
+                let x_usize = usize::try_from(xx).map_err(|_| "x index overflow".to_string())?;
+                let y_usize = usize::try_from(yy).map_err(|_| "y index overflow".to_string())?;
+                let row = y_usize
+                    .checked_mul(x_dim)
+                    .ok_or_else(|| "render row overflow".to_string())?;
+                let idx = row
+                    .checked_add(x_usize)
+                    .and_then(|p| p.checked_mul(3))
+                    .ok_or_else(|| "render pixel overflow".to_string())?;
+                if idx + 2 >= self.buffer.len() {
+                    continue;
+                }
+                add_glow(&mut self.buffer[idx..idx + 3], color, falloff);
             }
         }
 
         Ok(())
+    }
+}
+
+fn glow_kernel(point_radius: i32) -> Vec<(i32, i32, f32)> {
+    let radius = point_radius as f32 + 0.75;
+    let mut kernel = Vec::new();
+    for dy in -point_radius..=point_radius {
+        for dx in -point_radius..=point_radius {
+            let distance = ((dx * dx + dy * dy) as f32).sqrt();
+            let falloff = (1.0 - distance / radius).clamp(0.0, 1.0);
+            if falloff > 0.0 {
+                kernel.push((dx, dy, falloff));
+            }
+        }
+    }
+    kernel
+}
+
+fn decayed_channel(value: u8, background: u8, decay: f32) -> u8 {
+    let faded = f32::from(value) * decay;
+    faded.max(f32::from(background)).round() as u8
+}
+
+fn speed_scale(particles: &ParticleSoa) -> f64 {
+    let mut speeds = Vec::with_capacity(particles.len());
+    for i in 0..particles.len() {
+        let speed2 = particles.vx[i] * particles.vx[i] + particles.vy[i] * particles.vy[i];
+        if speed2.is_finite() {
+            speeds.push(speed2.sqrt());
+        }
+    }
+    if speeds.is_empty() {
+        return 1.0;
+    }
+    let index = speeds.len().saturating_sub(1) * 95 / 100;
+    let (_, percentile, _) = speeds.select_nth_unstable_by(index, f64::total_cmp);
+    percentile.max(1e-12)
+}
+
+fn speed_color(speed: f64, scale: f64) -> [u8; 3] {
+    let t = (speed / scale).clamp(0.0, 1.0) as f32;
+    if t < 0.55 {
+        let local = t / 0.55;
+        lerp_color([10, 30, 110], [35, 220, 255], local)
+    } else {
+        let local = (t - 0.55) / 0.45;
+        lerp_color([35, 220, 255], [255, 255, 255], local)
+    }
+}
+
+fn lerp_color(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
+    [
+        lerp_channel(a[0], b[0], t),
+        lerp_channel(a[1], b[1], t),
+        lerp_channel(a[2], b[2], t),
+    ]
+}
+
+fn lerp_channel(a: u8, b: u8, t: f32) -> u8 {
+    (f32::from(a) + (f32::from(b) - f32::from(a)) * t).round() as u8
+}
+
+fn add_glow(pixel: &mut [u8], color: [u8; 3], falloff: f32) {
+    for (channel, amount) in pixel.iter_mut().zip(color) {
+        let add = (f32::from(amount) * falloff).round() as u8;
+        *channel = channel.saturating_add(add);
     }
 }
 
