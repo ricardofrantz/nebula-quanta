@@ -714,11 +714,237 @@ fn traversal_stack_bytes(slots: usize, thread_count: usize) -> usize {
 mod tests {
     use super::{build_tree, compute_accel_barnes_hut, preflight_node_capacity, run_barnes_hut};
     use clap::Parser;
+    use std::f64::consts::PI;
 
     use crate::{
-        config::Args, direct::compute_direct_accel_with_g, direct::run_direct,
-        particle::ParticleSoa, tree::QuadTree,
+        config::Args,
+        direct::{compute_direct_accel_with_g, run_direct},
+        particle::{ParticleSoa, compute_energy_snapshot},
+        tree::QuadTree,
     };
+
+    const KEPLER_G: f64 = 1.0;
+    const KEPLER_R: f64 = 1.0;
+    const KEPLER_EPSILON: f64 = 0.0;
+    const POSITION_TOLERANCE_FACTOR: f64 = 1.0e-3;
+    const ENERGY_DRIFT_TOLERANCE: f64 = 1.0e-6;
+
+    #[derive(Clone, Copy)]
+    struct KeplerCase {
+        name: &'static str,
+        m1: f64,
+        m2: f64,
+    }
+
+    fn period(separation: f64, m1: f64, m2: f64, g: f64) -> f64 {
+        2.0 * PI * (separation.powi(3) / (g * (m1 + m2))).sqrt()
+    }
+
+    fn angular_velocity(separation: f64, m1: f64, m2: f64, g: f64) -> f64 {
+        (g * (m1 + m2) / separation.powi(3)).sqrt()
+    }
+
+    fn barycentric_radius(separation: f64, body_mass: f64, other_mass: f64) -> f64 {
+        separation * other_mass / (body_mass + other_mass)
+    }
+
+    fn analytic_positions(case: KeplerCase, separation: f64, g: f64, t: f64) -> [(f64, f64); 2] {
+        let r1 = barycentric_radius(separation, case.m1, case.m2);
+        let r2 = barycentric_radius(separation, case.m2, case.m1);
+        let angle = angular_velocity(separation, case.m1, case.m2, g) * t;
+        let (sin_a, cos_a) = angle.sin_cos();
+
+        [(-r1 * cos_a, -r1 * sin_a), (r2 * cos_a, r2 * sin_a)]
+    }
+
+    fn circular_two_body(case: KeplerCase, separation: f64, g: f64) -> ParticleSoa {
+        let mut particles = ParticleSoa::with_len(2);
+        let positions = analytic_positions(case, separation, g, 0.0);
+        let r1 = barycentric_radius(separation, case.m1, case.m2);
+        let r2 = barycentric_radius(separation, case.m2, case.m1);
+
+        // Derivation for the circular two-body oracle:
+        // In barycentric coordinates, body i orbits at radius
+        // r_i = r*m_other/(m1+m2) while the inter-body separation is r.
+        // Gravity gives body i acceleration a_i = G*m_other/r^2.  Uniform
+        // circular motion requires centripetal acceleration a_i = v_i^2/r_i.
+        // Equating them gives v_i^2/r_i = G*m_other/r^2, hence
+        // v_i = sqrt(G*m_other*r_i/r^2)
+        //     = sqrt(G*m_other^2/((m1+m2)*r)).  With angular velocity
+        // omega = v_i/r_i = sqrt(G*(m1+m2)/r^3), the period is
+        // T = 2*pi/omega = 2*pi*sqrt(r^3/(G*(m1+m2))).
+        particles.x[0] = positions[0].0;
+        particles.y[0] = positions[0].1;
+        particles.vx[0] = 0.0;
+        particles.vy[0] = -((g * case.m2 * case.m2) / ((case.m1 + case.m2) * separation)).sqrt();
+        particles.m[0] = case.m1;
+
+        particles.x[1] = positions[1].0;
+        particles.y[1] = positions[1].1;
+        particles.vx[1] = 0.0;
+        particles.vy[1] = ((g * case.m1 * case.m1) / ((case.m1 + case.m2) * separation)).sqrt();
+        particles.m[1] = case.m2;
+
+        debug_assert!(
+            (particles.vy[0].abs() - r1 * angular_velocity(separation, case.m1, case.m2, g)).abs()
+                < 1e-12
+        );
+        debug_assert!(
+            (particles.vy[1].abs() - r2 * angular_velocity(separation, case.m1, case.m2, g)).abs()
+                < 1e-12
+        );
+
+        particles
+    }
+
+    fn kepler_args(mode: &str, theta: f64, dt: f64, steps: usize) -> Args {
+        let theta_s = theta.to_string();
+        let dt_s = dt.to_string();
+        let steps_s = steps.to_string();
+        let g_s = KEPLER_G.to_string();
+        let epsilon_s = KEPLER_EPSILON.to_string();
+        Args::parse_from([
+            "nq",
+            "--n",
+            "2",
+            "--steps",
+            steps_s.as_str(),
+            "--dt",
+            dt_s.as_str(),
+            "--theta",
+            theta_s.as_str(),
+            "--epsilon",
+            epsilon_s.as_str(),
+            "--g",
+            g_s.as_str(),
+            "--integrator",
+            "leapfrog",
+            "--mode",
+            mode,
+            "--threads",
+            "1",
+            "--energy-drift",
+            "on",
+        ])
+    }
+
+    fn total_energy(particles: &ParticleSoa) -> f64 {
+        compute_energy_snapshot(particles, KEPLER_EPSILON, KEPLER_G, 0.0, true, 0)
+            .expect("two-body energy snapshot should be available")
+            .total
+    }
+
+    fn max_position_error(particles: &ParticleSoa, expected: [(f64, f64); 2]) -> f64 {
+        (0..2)
+            .map(|i| {
+                let dx = particles.x[i] - expected[i].0;
+                let dy = particles.y[i] - expected[i].1;
+                (dx * dx + dy * dy).sqrt()
+            })
+            .fold(0.0, f64::max)
+    }
+
+    fn assert_kepler_orbit(case: KeplerCase, mode: &str, theta: f64) -> Result<(), String> {
+        let t_period = period(KEPLER_R, case.m1, case.m2, KEPLER_G);
+        let dt = t_period / 1000.0;
+        let start = circular_two_body(case, KEPLER_R, KEPLER_G);
+
+        // epsilon=0 is supported by the direct and Barnes-Hut kernels for this
+        // non-colliding setup; because no softening is applied, its effect on
+        // the closed-form orbit and energy bound is exactly zero.
+        let mut one_period = start.clone();
+        let one_period_args = kepler_args(mode, theta, dt, 1000);
+        match mode {
+            "direct" => {
+                run_direct(&mut one_period, &one_period_args, None)?;
+            }
+            "barnes_hut" => {
+                run_barnes_hut(&mut one_period, &one_period_args, None)?;
+            }
+            _ => unreachable!("unsupported test mode"),
+        }
+        let position_error = max_position_error(
+            &one_period,
+            analytic_positions(case, KEPLER_R, KEPLER_G, t_period),
+        );
+        eprintln!(
+            "kepler case={} mode={} one_period_position_error={} tolerance={}",
+            case.name,
+            mode,
+            position_error,
+            POSITION_TOLERANCE_FACTOR * KEPLER_R
+        );
+        assert!(
+            position_error < POSITION_TOLERANCE_FACTOR * KEPLER_R,
+            "kepler case={} mode={} position error {} exceeds {}",
+            case.name,
+            mode,
+            position_error,
+            POSITION_TOLERANCE_FACTOR * KEPLER_R
+        );
+
+        let mut ten_periods = start;
+        let initial_energy = total_energy(&ten_periods);
+        let ten_period_args = kepler_args(mode, theta, dt, 10_000);
+        match mode {
+            "direct" => {
+                run_direct(&mut ten_periods, &ten_period_args, None)?;
+            }
+            "barnes_hut" => {
+                run_barnes_hut(&mut ten_periods, &ten_period_args, None)?;
+            }
+            _ => unreachable!("unsupported test mode"),
+        }
+        let final_energy = total_energy(&ten_periods);
+        let relative_energy_drift = (final_energy - initial_energy).abs() / initial_energy.abs();
+        eprintln!(
+            "kepler case={} mode={} relative_energy_drift={} tolerance={}",
+            case.name, mode, relative_energy_drift, ENERGY_DRIFT_TOLERANCE
+        );
+        assert!(
+            relative_energy_drift < ENERGY_DRIFT_TOLERANCE,
+            "kepler case={} mode={} relative energy drift {} exceeds {}",
+            case.name,
+            mode,
+            relative_energy_drift,
+            ENERGY_DRIFT_TOLERANCE
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn kepler_circular_two_body_direct_oracle() -> Result<(), String> {
+        for case in [
+            KeplerCase {
+                name: "equal_masses",
+                m1: 1.0,
+                m2: 1.0,
+            },
+            KeplerCase {
+                name: "three_to_one_mass_ratio",
+                m1: 1.0,
+                m2: 3.0,
+            },
+        ] {
+            assert_kepler_orbit(case, "direct", 0.0)?;
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn kepler_circular_two_body_barnes_hut_oracle() -> Result<(), String> {
+        assert_kepler_orbit(
+            KeplerCase {
+                name: "equal_masses",
+                m1: 1.0,
+                m2: 1.0,
+            },
+            "barnes_hut",
+            1.0e-6,
+        )
+    }
 
     #[test]
     fn rk2_integration_matches_direct_when_treated_as_direct() -> Result<(), String> {

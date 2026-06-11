@@ -5,6 +5,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Two-body Kepler analytical oracle tests: leapfrog verified against closed-form circular orbits (position and energy-conservation bounds).
+
 ### Changed
 - README hero video re-rendered with the corrected Barnes-Hut physics; the GIF now loops seamlessly.
 
