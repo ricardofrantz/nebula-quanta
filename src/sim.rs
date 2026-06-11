@@ -262,10 +262,12 @@ fn integrate_rk2_step(
     )?;
 
     for i in 0..particles.len() {
+        // Explicit midpoint RK2: advance both position and velocity using the
+        // midpoint velocity/acceleration estimated from the start-of-step state.
         particles.x[i] += mid_particles.vx[i] * dt;
         particles.y[i] += mid_particles.vy[i] * dt;
-        particles.vx[i] += 0.5 * (ax[i] + mid_ax[i]) * dt;
-        particles.vy[i] += 0.5 * (ay[i] + mid_ay[i]) * dt;
+        particles.vx[i] += mid_ax[i] * dt;
+        particles.vy[i] += mid_ay[i] * dt;
     }
     Ok(())
 }
@@ -804,6 +806,16 @@ mod tests {
     }
 
     fn kepler_args(mode: &str, theta: f64, dt: f64, steps: usize) -> Args {
+        kepler_args_with_integrator(mode, theta, dt, steps, "leapfrog")
+    }
+
+    fn kepler_args_with_integrator(
+        mode: &str,
+        theta: f64,
+        dt: f64,
+        steps: usize,
+        integrator: &str,
+    ) -> Args {
         let theta_s = theta.to_string();
         let dt_s = dt.to_string();
         let steps_s = steps.to_string();
@@ -824,7 +836,7 @@ mod tests {
             "--g",
             g_s.as_str(),
             "--integrator",
-            "leapfrog",
+            integrator,
             "--mode",
             mode,
             "--threads",
@@ -936,6 +948,69 @@ mod tests {
             .fold(0.0, f64::max)
     }
 
+    fn run_kepler_direct(
+        case: KeplerCase,
+        integrator: &str,
+        dt: f64,
+        steps: usize,
+    ) -> Result<ParticleSoa, String> {
+        let mut particles = circular_two_body(case, KEPLER_R, KEPLER_G);
+        let args = kepler_args_with_integrator("direct", 0.0, dt, steps, integrator);
+        run_direct(&mut particles, &args, None)?;
+        Ok(particles)
+    }
+
+    fn position_error_after_period(
+        case: KeplerCase,
+        integrator: &str,
+        steps: usize,
+    ) -> Result<f64, String> {
+        let t_period = period(KEPLER_R, case.m1, case.m2, KEPLER_G);
+        let dt = t_period / steps as f64;
+        let particles = run_kepler_direct(case, integrator, dt, steps)?;
+        Ok(max_position_error(
+            &particles,
+            analytic_positions(case, KEPLER_R, KEPLER_G, t_period),
+        ))
+    }
+
+    fn average_convergence_order(errors: &[f64; 4]) -> f64 {
+        errors
+            .windows(2)
+            .map(|pair| (pair[0] / pair[1]).log2())
+            .sum::<f64>()
+            / 3.0
+    }
+
+    fn assert_kepler_convergence_order(
+        case: KeplerCase,
+        integrator: &str,
+        minimum_order: f64,
+    ) -> Result<f64, String> {
+        let step_counts = [200usize, 400, 800, 1600];
+        let errors = [
+            position_error_after_period(case, integrator, step_counts[0])?,
+            position_error_after_period(case, integrator, step_counts[1])?,
+            position_error_after_period(case, integrator, step_counts[2])?,
+            position_error_after_period(case, integrator, step_counts[3])?,
+        ];
+        let order = average_convergence_order(&errors);
+        eprintln!(
+            "kepler_convergence case={} integrator={} steps={:?} position_errors={:?} average_order={:.6}",
+            case.name, integrator, step_counts, errors, order
+        );
+        assert!(
+            order >= minimum_order,
+            "kepler convergence case={} integrator={} order {} below {} (errors {:?})",
+            case.name,
+            integrator,
+            order,
+            minimum_order,
+            errors
+        );
+        Ok(order)
+    }
+
     fn assert_kepler_orbit(case: KeplerCase, mode: &str, theta: f64) -> Result<(), String> {
         let t_period = period(KEPLER_R, case.m1, case.m2, KEPLER_G);
         let dt = t_period / 1000.0;
@@ -1036,6 +1111,27 @@ mod tests {
             "barnes_hut",
             1.0e-6,
         )
+    }
+
+    #[test]
+    fn convergence_order_for_rk2_and_leapfrog_kepler_cases() -> Result<(), String> {
+        for case in [
+            KeplerCase {
+                name: "equal_masses",
+                m1: 1.0,
+                m2: 1.0,
+            },
+            KeplerCase {
+                name: "three_to_one_mass_ratio",
+                m1: 1.0,
+                m2: 3.0,
+            },
+        ] {
+            assert_kepler_convergence_order(case, "rk2", 1.9)?;
+            assert_kepler_convergence_order(case, "leapfrog", 1.9)?;
+        }
+
+        Ok(())
     }
 
     #[test]

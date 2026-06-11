@@ -189,7 +189,7 @@ ffmpeg -y -framerate 30 -i captured_run/frame_%06d.ppm -c:v libx264 -pix_fmt yuv
 - `--theta <barnes-hut opening angle>`
 - `--epsilon <softening>`
 - `--g <gravity constant multiplier>` (default: `1`)
-- `--integrator <leapfrog|verlet|rk2>` (default: `leapfrog`)
+- `--integrator <leapfrog|verlet|rk2>` (default: `leapfrog`; `rk2` is explicit midpoint)
 - `--init <uniform|gaussian|plummer|disk|rotating-disk|keplerian-disk>`
 - `--init-radius <radius>`
 - `--init-spread <spread>`

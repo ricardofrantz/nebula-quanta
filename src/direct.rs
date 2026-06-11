@@ -324,10 +324,12 @@ fn integrate_rk2_direct_step(
     compute_direct_accel_with_g(mid_particles, epsilon, g, mid_ax, mid_ay);
 
     for i in 0..n {
+        // Explicit midpoint RK2: advance both position and velocity using the
+        // midpoint velocity/acceleration estimated from the start-of-step state.
         particles.x[i] += mid_particles.vx[i] * dt;
         particles.y[i] += mid_particles.vy[i] * dt;
-        particles.vx[i] += 0.5 * (ax[i] + mid_ax[i]) * dt;
-        particles.vy[i] += 0.5 * (ay[i] + mid_ay[i]) * dt;
+        particles.vx[i] += mid_ax[i] * dt;
+        particles.vy[i] += mid_ay[i] * dt;
     }
 }
 
