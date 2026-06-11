@@ -193,26 +193,60 @@ pub fn compute_energy_snapshot(
         });
     }
 
-    let kinetic = total_kinetic_energy(particles);
     let n = particles.len();
-
     let force_exact = require_exact || sample_ratio <= 0.0 || n <= 8192;
-    let potential = if force_exact || (sample_ratio >= 1.0) {
-        total_potential_energy_exact(particles, epsilon, g)
-    } else {
-        total_potential_energy_sampled(particles, epsilon, g, sample_ratio, sample_seed)
-    };
+    if force_exact || (sample_ratio >= 1.0) {
+        return Some(compute_exact_energy_snapshot(particles, epsilon, g));
+    }
+
+    let kinetic = total_kinetic_energy(particles);
+    let potential =
+        total_potential_energy_sampled(particles, epsilon, g, sample_ratio, sample_seed);
 
     Some(EnergySnapshot {
         kinetic,
         potential,
         total: kinetic + potential,
-        sampled_pairs: if force_exact {
-            n.saturating_mul(n.saturating_sub(1)) / 2
-        } else {
-            sampled_pair_count(n, sample_ratio)
-        },
+        sampled_pairs: sampled_pair_count(n, sample_ratio),
     })
+}
+
+pub fn compute_exact_energy_snapshot(
+    particles: &ParticleSoa,
+    epsilon: f64,
+    g: f64,
+) -> EnergySnapshot {
+    let kinetic = total_kinetic_energy(particles);
+    let potential = total_potential_energy_exact(particles, epsilon, g);
+    let n = particles.len();
+
+    EnergySnapshot {
+        kinetic,
+        potential,
+        total: kinetic + potential,
+        sampled_pairs: n.saturating_mul(n.saturating_sub(1)) / 2,
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn compute_sampled_energy_snapshot(
+    particles: &ParticleSoa,
+    epsilon: f64,
+    g: f64,
+    sample_ratio: f64,
+    sample_seed: u64,
+) -> EnergySnapshot {
+    let kinetic = total_kinetic_energy(particles);
+    let potential =
+        total_potential_energy_sampled(particles, epsilon, g, sample_ratio, sample_seed);
+    let n = particles.len();
+
+    EnergySnapshot {
+        kinetic,
+        potential,
+        total: kinetic + potential,
+        sampled_pairs: sampled_pair_count(n, sample_ratio),
+    }
 }
 
 pub fn total_kinetic_energy(particles: &ParticleSoa) -> f64 {

@@ -721,7 +721,10 @@ mod tests {
     use crate::{
         config::Args,
         direct::{compute_direct_accel_with_g, run_direct},
-        particle::{ParticleSoa, compute_energy_snapshot},
+        particle::{
+            ParticleSoa, compute_energy_snapshot, compute_exact_energy_snapshot,
+            compute_sampled_energy_snapshot,
+        },
         tree::QuadTree,
     };
 
@@ -853,15 +856,22 @@ mod tests {
     }
 
     fn regression_energy(particles: &ParticleSoa, args: &Args) -> f64 {
-        compute_energy_snapshot(particles, args.epsilon, args.g, 0.0, true, args.seed)
-            .expect("regression energy snapshot should be available")
-            .total
+        compute_exact_energy_snapshot(particles, args.epsilon, args.g).total
     }
 
     fn energy_regression_args(init: &str, seed: u64) -> Args {
+        energy_regression_args_with_dt_steps(
+            init,
+            seed,
+            ENERGY_REGRESSION_DT,
+            ENERGY_REGRESSION_STEPS,
+        )
+    }
+
+    fn energy_regression_args_with_dt_steps(init: &str, seed: u64, dt: f64, steps: usize) -> Args {
         let n_s = ENERGY_REGRESSION_N.to_string();
-        let steps_s = ENERGY_REGRESSION_STEPS.to_string();
-        let dt_s = ENERGY_REGRESSION_DT.to_string();
+        let steps_s = steps.to_string();
+        let dt_s = dt.to_string();
         let theta_s = ENERGY_REGRESSION_THETA.to_string();
         let epsilon_s = ENERGY_REGRESSION_EPSILON.to_string();
         let seed_s = seed.to_string();
@@ -891,14 +901,8 @@ mod tests {
         ])
     }
 
-    fn assert_energy_drift_regression(
-        case_name: &str,
-        init: &str,
-        seed: u64,
-        threshold: f64,
-    ) -> Result<(), String> {
-        let args = energy_regression_args(init, seed);
-        let mut particles = ParticleSoa::random_with_profiles(
+    fn regression_particles(args: &Args) -> ParticleSoa {
+        ParticleSoa::random_with_profiles(
             args.n,
             args.seed,
             args.init,
@@ -914,13 +918,27 @@ mod tests {
             args.mass_min,
             args.mass_max,
             args.mass_alpha,
-        );
-        let initial_energy = regression_energy(&particles, &args);
+        )
+    }
 
-        run_barnes_hut(&mut particles, &args, None)?;
+    fn relative_energy_drift_for(args: &Args) -> Result<f64, String> {
+        let mut particles = regression_particles(args);
+        let initial_energy = regression_energy(&particles, args);
 
-        let final_energy = regression_energy(&particles, &args);
-        let relative_energy_drift = (final_energy - initial_energy).abs() / initial_energy.abs();
+        run_barnes_hut(&mut particles, args, None)?;
+
+        let final_energy = regression_energy(&particles, args);
+        Ok((final_energy - initial_energy).abs() / initial_energy.abs())
+    }
+
+    fn assert_energy_drift_regression(
+        case_name: &str,
+        init: &str,
+        seed: u64,
+        threshold: f64,
+    ) -> Result<(), String> {
+        let args = energy_regression_args(init, seed);
+        let relative_energy_drift = relative_energy_drift_for(&args)?;
         eprintln!(
             "energy_drift_regression case={} init={} seed={} relative_energy_drift={:.15} threshold={:.15}",
             case_name, init, seed, relative_energy_drift, threshold
@@ -1135,22 +1153,89 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "diagnostic: compares sampled and exact potential energy for bead nebula-quanta-nny"]
+    fn diagnostic_sampling_vs_exact_potential_plummer_seed_42() -> Result<(), String> {
+        const SAMPLE_RATIO: f64 = 0.01;
+        let args = energy_regression_args("plummer", 42);
+        let mut particles = regression_particles(&args);
+        let sample_seed = args.seed.wrapping_add(0x9E3779B97F4A7C15);
+
+        let initial_sampled = compute_sampled_energy_snapshot(
+            &particles,
+            args.epsilon,
+            args.g,
+            SAMPLE_RATIO,
+            sample_seed,
+        );
+        let initial_exact = compute_exact_energy_snapshot(&particles, args.epsilon, args.g);
+
+        run_barnes_hut(&mut particles, &args, None)?;
+
+        let final_sampled = compute_sampled_energy_snapshot(
+            &particles,
+            args.epsilon,
+            args.g,
+            SAMPLE_RATIO,
+            sample_seed,
+        );
+        let final_exact = compute_exact_energy_snapshot(&particles, args.epsilon, args.g);
+
+        eprintln!(
+            "diagnostic_sampling_vs_exact case=plummer_seed_42 sample_ratio={} initial_sampled_pe={:.15} initial_exact_pe={:.15} final_sampled_pe={:.15} final_exact_pe={:.15} sampled_pairs={} exact_pairs={}",
+            SAMPLE_RATIO,
+            initial_sampled.potential,
+            initial_exact.potential,
+            final_sampled.potential,
+            final_exact.potential,
+            initial_sampled.sampled_pairs,
+            initial_exact.sampled_pairs,
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "diagnostic: dt scaling over fixed physical time for bead nebula-quanta-nny"]
+    fn diagnostic_exact_energy_dt_scaling_plummer_seed_42() -> Result<(), String> {
+        let cases = [(0.001, 500usize), (0.0005, 1000usize), (0.00025, 2000usize)];
+        let mut drifts = Vec::with_capacity(cases.len());
+        for (dt, steps) in cases {
+            let args = energy_regression_args_with_dt_steps("plummer", 42, dt, steps);
+            let drift = relative_energy_drift_for(&args)?;
+            eprintln!(
+                "diagnostic_dt_scaling case=plummer_seed_42 dt={:.8} steps={} relative_energy_drift={:.15}",
+                dt, steps, drift
+            );
+            drifts.push(drift);
+        }
+        let exponent_01 = (drifts[0] / drifts[1]).log2();
+        let exponent_12 = (drifts[1] / drifts[2]).log2();
+        let average_exponent = 0.5 * (exponent_01 + exponent_12);
+        eprintln!(
+            "diagnostic_dt_scaling case=plummer_seed_42 exponents=[{:.6}, {:.6}] average_exponent={:.6}",
+            exponent_01, exponent_12, average_exponent
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn energy_drift_plummer_seed_42_regression() -> Result<(), String> {
-        // Baseline measured 2026-06-11: |energy_drift_rel| = 0.997984882458993
+        // Exact-PE baseline measured 2026-06-11: |energy_drift_rel| = 0.997984882458993
         // (3/3 repeated runs were bit-identical); threshold is 3x baseline.
         assert_energy_drift_regression("plummer_seed_42", "plummer", 42, 2.993954647376979)
     }
 
     #[test]
     fn energy_drift_plummer_seed_1337_regression() -> Result<(), String> {
-        // Baseline measured 2026-06-11: |energy_drift_rel| = 0.939209763986541
+        // Exact-PE baseline measured 2026-06-11: |energy_drift_rel| = 0.939209763986541
         // (3/3 repeated runs were bit-identical); threshold is 3x baseline.
         assert_energy_drift_regression("plummer_seed_1337", "plummer", 1337, 2.817629291959623)
     }
 
     #[test]
     fn energy_drift_rotating_disk_seed_42_regression() -> Result<(), String> {
-        // Disk case uses the rotating-disk initializer. Baseline measured
+        // Disk case uses the rotating-disk initializer. Exact-PE baseline measured
         // 2026-06-11: |energy_drift_rel| = 0.979700299946477 (3/3 repeated
         // runs were bit-identical); threshold is 3x baseline.
         assert_energy_drift_regression(
