@@ -20,7 +20,11 @@ What "improvement" means here, in priority order:
    for exactly this reason); speedups ship with an accuracy parity check.
 4. **Capabilities** — only after the above: 3D, more integrators, richer
    output formats.
+5. **Showcase at scale** — offline million-body renders (galaxy disks,
+   mergers) that demonstrate the verified physics, every clip shipping with
+   its exact seeded reproduction command and measured benchmark rows.
 
-Non-goals: publication-scale astrophysics (no individual timesteps, no
-million-body GPU runs), and visual output beyond the existing MP4/GIF
-pipeline. The renders are a demo of the physics, not the product.
+Non-goals: publication-scale astrophysics (no individual timesteps), GPU
+compute, interactive GUI/real-time use, and SPH/fluids. The renders are a
+demo of the physics, not the product — the receipts (benchmarks, parameter
+tables, repro commands) are what make them worth publishing.
