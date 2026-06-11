@@ -41,7 +41,7 @@ impl FrameRecorder {
         let width = args.width;
         let height = args.height;
         let buffer_len = frame_byte_size(width, height)?;
-        let background = [255, 255, 255];
+        let background = [0, 0, 0];
         let point_radius = 0;
 
         Ok(Self {
@@ -199,9 +199,11 @@ fn decayed_channel(value: u8, background: u8, decay: f32) -> u8 {
 }
 
 fn stamp_ink(pixel: &mut [u8], falloff: f32) {
-    for channel in pixel.iter_mut() {
-        let ink = (255.0 * falloff).round() as u8;
-        *channel = channel.saturating_sub(ink);
+    // Golden star color, accumulated additively so overlapping bodies brighten.
+    const GOLD: [u8; 3] = [255, 200, 110];
+    for (channel, gold) in pixel.iter_mut().zip(GOLD) {
+        let ink = (f32::from(gold) * falloff).round() as u8;
+        *channel = channel.saturating_add(ink);
     }
 }
 

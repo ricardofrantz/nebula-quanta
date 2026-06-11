@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - README opens with a didactic explainer: what an N-body simulation is, the cold-collapse physics behind the hero clip (with its full parameter table), and how the Barnes-Hut quadtree plus a zero-allocation hot loop make it fast.
 
 ### Changed
+- Hero video re-rendered as 20,000 golden bodies on black (additive star-like dots), framed at the README banner's aspect ratio (1984x794), with the velocity amplitude recalibrated so the cold-collapse virial ratio stays 0.30 at the higher N; the README now flows banner → explainer → clip, with the parameter table and repro command in a dedicated "Reproducing the clip" section.
 - Hero video replaced with a cold-collapse run (8000-body Plummer cloud at virial ratio 0.30): minimal scientific rendering of single-pixel black dots on white, fixed camera, and a tail-into-head crossfade loop instead of the forward-reverse bounce.
 - The `simd` cargo feature is renamed to `unrolled`: it is manual 4-lane scalar unrolling, not SIMD. A real f64x4 trial benchmarked slower than the existing unrolling, so the honest name ships instead; the feature now carries an accuracy parity test against the scalar kernel and CI builds both configurations.
 - README hero video re-rendered with the corrected Barnes-Hut physics; the GIF now loops seamlessly.

@@ -3,25 +3,15 @@
 [![Rust 2024](https://img.shields.io/badge/Rust-2024-blue.svg)](Cargo.toml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](Cargo.toml)
 
-[![Watch the simulation](./nebula-quanta-barnes_hut.gif)](./nebula-quanta-barnes_hut.mp4)
-
-[Download MP4](./nebula-quanta-barnes_hut.mp4)
-
-The GIF is a forward loop with the tail crossfaded into the head; the MP4 is the plain forward clip. Exact seeded reproduction command:
-
-```bash
-target/release/nq --n 8000 --steps 718 --dt 0.00014 --theta 0.7 --epsilon 0.005 --init plummer --init-radius 1 --init-v-amp 65.9350324501817 --mass-profile lognormal --mass-stddev 0.5 --mass-min 0.2 --mass-max 5 --seed 1902 --integrator leapfrog --view-radius 4.0 --threads 1 --energy-drift off --width 1280 --height 720 --record --frames-dir .sc/h09-final/frames --fps 30 --every-steps 2
-```
-
-## What you are looking at
-
 Newton can tell you exactly how two bodies orbit each other. Add a third and
 there is no formula anymore — the only way to know where things end up is to
 compute every gravitational pull and step time forward in small increments.
-That is an N-body simulation: here, 8000 point masses, each attracting all
+That is an N-body simulation: here, 20,000 point masses, each attracting all
 the others, advanced step by step with a leapfrog integrator (a scheme that
 respects the energy bookkeeping of orbital motion far better than naive
 stepping).
+
+[![Watch the simulation](./nebula-quanta-barnes_hut.gif)](./nebula-quanta-barnes_hut.mp4)
 
 The clip shows a classic experiment from stellar dynamics: **cold collapse**.
 The bodies start as a fuzzy round cloud (a Plummer profile) with too little
@@ -31,27 +21,36 @@ itself, the infall overshoots, and in a few crossing times the system
 "violently relaxes": most bodies settle into a dense core while the energy
 they shed ejects others into a sparse halo. The same physics — collapse,
 relaxation, core-plus-halo — shapes real star clusters; this is a miniature
-of it. Every black dot is one body, drawn in a fixed window so you watch the
+of it. Every golden dot is one body, drawn in a fixed window so you watch the
 collapse instead of a zooming camera.
+
+## Reproducing the clip
 
 The run is fully deterministic: same seed, same machine ordering, same frames.
 These are the exact parameters behind the clip:
 
 | Parameter | Value | Meaning |
 | --- | --- | --- |
-| N | 8000 | bodies |
+| N | 20000 | bodies |
 | 2K/\|W\| | 0.30 | initial kinetic/virial energy — "cold", so it collapses |
 | dt | 1.4e-4 | integration time step |
-| epsilon | 5e-3 | force softening, ~0.08x the mean particle spacing |
+| epsilon | 5e-3 | force softening |
 | theta | 0.7 | Barnes–Hut opening angle (accuracy/speed knob) |
 | integrator | leapfrog | symplectic second-order scheme |
 | seed | 1902 | RNG seed for the initial cloud |
 | view radius | 4 | fixed half-width of the camera window |
 
+```bash
+target/release/nq --n 20000 --steps 718 --dt 0.00014 --theta 0.7 --epsilon 0.005 --init plummer --init-radius 1 --init-v-amp 104.78571196775347 --mass-profile lognormal --mass-stddev 0.5 --mass-min 0.2 --mass-max 5 --seed 1902 --integrator leapfrog --view-radius 4.0 --threads 1 --energy-drift off --width 1984 --height 794 --record --frames-dir capture --fps 30 --every-steps 2
+```
+
+The GIF is a forward loop with the tail crossfaded into the head; the
+[MP4](./nebula-quanta-barnes_hut.mp4) is the plain forward clip.
+
 ## How Barnes–Hut makes it fast
 
-The honest way to compute gravity is to sum every pair: 8000 bodies means
-~32 million force pairs, every step, for 718 steps. That direct sum is in
+The honest way to compute gravity is to sum every pair: 20,000 bodies means
+~200 million force pairs, every step, for 718 steps. That direct sum is in
 this repo (it serves as the accuracy baseline), but it scales as N², which
 is what stops most naive simulations cold.
 
@@ -75,11 +74,11 @@ The implementation keeps the hot loop boring on purpose:
   the force loop performs zero heap allocations;
 - tree traversal uses an explicit reusable stack, not recursion;
 - every run prints its own telemetry (the hero run uses 408 bytes per body
-  and fills 90% of its node pool), so the memory claims above are printed,
+  and fills 89% of its node pool), so the memory claims above are printed,
   not promised.
 
 On the benchmark machine the full pipeline — build the tree, evaluate all
-8000 forces, integrate, and write a 1280x720 frame — runs at ~52 steps per
+20,000 forces, integrate, and write a 1984x794 frame — runs at ~15 steps per
 second single-threaded.
 
 `nq` is a focused Barnes–Hut N-body simulation CLI in Rust.
