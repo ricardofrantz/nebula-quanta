@@ -1,19 +1,12 @@
 use clap::Parser;
-
-mod config;
-mod direct;
-mod frame;
-mod particle;
-mod sim;
-mod stats;
-mod tree;
-
-use config::Args;
-use config::Dimensionality;
-use direct::{compute_direct_accel_with_g, run_direct};
-use frame::FrameRecorder;
-use particle::{
-    EnergySnapshot, ParticleSoa, compute_energy_snapshot, particle_bounds, total_momentum,
+use nebula_quanta::{
+    config::{Args, Dimensionality},
+    direct::{compute_direct_accel_with_g, run_direct},
+    frame::FrameRecorder,
+    particle::{
+        EnergySnapshot, ParticleSoa, compute_energy_snapshot, particle_bounds, total_momentum,
+    },
+    sim,
 };
 use std::path::PathBuf;
 

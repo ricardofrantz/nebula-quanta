@@ -15,7 +15,7 @@ pub fn run_direct(
     args: &Args,
     recorder: Option<&mut FrameRecorder>,
 ) -> Result<RunStats, String> {
-    if particles.len() == 0 {
+    if particles.is_empty() {
         return Ok(RunStats::zero());
     }
 

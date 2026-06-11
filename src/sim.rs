@@ -66,7 +66,7 @@ pub fn run_barnes_hut(
     args: &Args,
     recorder: Option<&mut FrameRecorder>,
 ) -> Result<RunStats, String> {
-    if particles.len() == 0 {
+    if particles.is_empty() {
         return Ok(RunStats::zero());
     }
 
@@ -272,7 +272,7 @@ fn integrate_rk2_step(
     Ok(())
 }
 
-fn build_tree(tree: &mut QuadTree, particles: &ParticleSoa) -> Result<(), String> {
+pub fn build_tree(tree: &mut QuadTree, particles: &ParticleSoa) -> Result<(), String> {
     let n = particles.len();
     if n == 0 {
         return Ok(());
@@ -467,7 +467,7 @@ fn choose_child(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn compute_accel_barnes_hut(
+pub fn compute_accel_barnes_hut(
     particles: &ParticleSoa,
     tree: &QuadTree,
     theta: f64,
@@ -672,7 +672,7 @@ const F64_BYTES: usize = size_of::<f64>();
 const NODE_BYTES: usize = size_of::<Node>();
 const USIZE_BYTES: usize = size_of::<usize>();
 
-fn preflight_node_capacity(n: usize) -> Result<usize, String> {
+pub fn preflight_node_capacity(n: usize) -> Result<usize, String> {
     n.checked_mul(4)
         .and_then(|v| v.checked_add(1))
         .ok_or_else(|| "node capacity overflow for requested particle count".to_string())

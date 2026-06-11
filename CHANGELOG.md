@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Criterion benchmark suite (`cargo bench`) for tree build, Barnes-Hut force, and direct force, with a recorded baseline in `BENCHMARKS.md`; the crate now also exposes a library target.
 - Two-body Kepler analytical oracle tests: leapfrog verified against closed-form circular orbits (position and energy-conservation bounds).
 
 ### Changed

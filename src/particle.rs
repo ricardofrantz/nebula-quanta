@@ -118,6 +118,10 @@ impl ParticleSoa {
     pub fn len(&self) -> usize {
         self.x.len()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.x.is_empty()
+    }
 }
 
 pub fn particle_bounds(particles: &ParticleSoa) -> Result<(f64, f64, f64, f64), String> {
@@ -184,7 +188,7 @@ pub fn compute_energy_snapshot(
     require_exact: bool,
     sample_seed: u64,
 ) -> Option<EnergySnapshot> {
-    if particles.len() == 0 {
+    if particles.is_empty() {
         return Some(EnergySnapshot {
             kinetic: 0.0,
             potential: 0.0,
