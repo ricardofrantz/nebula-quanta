@@ -714,7 +714,10 @@ fn traversal_stack_bytes(slots: usize, thread_count: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_tree, compute_accel_barnes_hut, preflight_node_capacity, run_barnes_hut};
+    use super::{
+        build_tree, compute_accel_barnes_hut, compute_barnes_hut_accel_snapshot,
+        preflight_node_capacity, run_barnes_hut,
+    };
     use clap::Parser;
     use std::f64::consts::PI;
 
@@ -902,6 +905,53 @@ mod tests {
             "--energy-drift",
             "on",
         ])
+    }
+
+    fn thread_parity_args(threads: usize) -> Args {
+        let threads_s = threads.to_string();
+        Args::parse_from([
+            "nq",
+            "--n",
+            "4097",
+            "--init",
+            "plummer",
+            "--steps",
+            "20",
+            "--dt",
+            "0.001",
+            "--theta",
+            "0.5",
+            "--epsilon",
+            "0.01",
+            "--g",
+            "0.9",
+            "--integrator",
+            "leapfrog",
+            "--seed",
+            "42",
+            "--threads",
+            threads_s.as_str(),
+        ])
+    }
+
+    fn assert_bitwise_eq(label: &str, threads: usize, baseline: &[f64], candidate: &[f64]) {
+        assert_eq!(
+            baseline.len(),
+            candidate.len(),
+            "thread parity {label} length mismatch for threads={threads}: threads=1 len={}, threads={threads} len={}",
+            baseline.len(),
+            candidate.len()
+        );
+
+        for (i, (&expected, &actual)) in baseline.iter().zip(candidate).enumerate() {
+            assert_eq!(
+                expected.to_bits(),
+                actual.to_bits(),
+                "thread parity {label} mismatch for threads={threads} at particle {i}: threads=1 value={expected:.17e} bits=0x{:016x}, threads={threads} value={actual:.17e} bits=0x{:016x}",
+                expected.to_bits(),
+                actual.to_bits()
+            );
+        }
     }
 
     fn regression_particles(args: &Args) -> ParticleSoa {
@@ -1312,6 +1362,44 @@ mod tests {
             "diagnostic_dt_scaling case=plummer_seed_42 exponents=[{:.6}, {:.6}] average_exponent={:.6}",
             exponent_01, exponent_12, average_exponent
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn thread_parity_plummer_seed_42_matches_single_thread_bitwise() -> Result<(), String> {
+        let args_single = thread_parity_args(1);
+        let initial_particles = regression_particles(&args_single);
+        let (single_ax, single_ay) =
+            compute_barnes_hut_accel_snapshot(&initial_particles, &args_single)?;
+
+        let mut single_final = initial_particles.clone();
+        run_barnes_hut(&mut single_final, &args_single, None)?;
+
+        // The threaded path partitions particle indices into disjoint contiguous
+        // chunks. Each worker calls the same per-particle traversal and writes
+        // only its own ax/ay slots, so no reduction or accumulation order changes.
+        for threads in [2usize, 3, 4] {
+            let args_threaded = thread_parity_args(threads);
+            assert_ne!(
+                args_threaded.n % threads,
+                0,
+                "N=4097 should exercise remainder chunk distribution for threads={threads}"
+            );
+
+            let (threaded_ax, threaded_ay) =
+                compute_barnes_hut_accel_snapshot(&initial_particles, &args_threaded)?;
+            assert_bitwise_eq("initial ax", threads, &single_ax, &threaded_ax);
+            assert_bitwise_eq("initial ay", threads, &single_ay, &threaded_ay);
+
+            let mut threaded_final = initial_particles.clone();
+            run_barnes_hut(&mut threaded_final, &args_threaded, None)?;
+            assert_bitwise_eq("final x", threads, &single_final.x, &threaded_final.x);
+            assert_bitwise_eq("final y", threads, &single_final.y, &threaded_final.y);
+            assert_bitwise_eq("final vx", threads, &single_final.vx, &threaded_final.vx);
+            assert_bitwise_eq("final vy", threads, &single_final.vy, &threaded_final.vy);
+            eprintln!("thread_parity plummer seed=42 threads={threads} equality=bitwise");
+        }
 
         Ok(())
     }
