@@ -9,8 +9,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Criterion benchmark suite (`cargo bench`) for tree build, Barnes-Hut force, and direct force, with a recorded baseline in `BENCHMARKS.md`; the crate now also exposes a library target.
 - Two-body Kepler analytical oracle tests: leapfrog verified against closed-form circular orbits (position and energy-conservation bounds).
 
+### Added
+- `--view-radius <r>` flag: fixed square camera window centered on the origin (0 keeps the per-frame auto-fit), so recordings can hold a stable view while ejecta leave the frame.
+- README opens with a didactic explainer: what an N-body simulation is, the cold-collapse physics behind the hero clip (with its full parameter table), and how the Barnes-Hut quadtree plus a zero-allocation hot loop make it fast.
+
 ### Changed
-- README hero video re-rendered with a cinematic renderer: speed-mapped color (blue core ramping to cyan and white), motion trails via per-frame decay, and additive glow; the loop stays seamless and the physics command is unchanged.
+- Hero video replaced with a cold-collapse run (8000-body Plummer cloud at virial ratio 0.30): minimal scientific rendering of single-pixel black dots on white, fixed camera, and a tail-into-head crossfade loop instead of the forward-reverse bounce.
 - The `simd` cargo feature is renamed to `unrolled`: it is manual 4-lane scalar unrolling, not SIMD. A real f64x4 trial benchmarked slower than the existing unrolling, so the honest name ships instead; the feature now carries an accuracy parity test against the scalar kernel and CI builds both configurations.
 - README hero video re-rendered with the corrected Barnes-Hut physics; the GIF now loops seamlessly.
 

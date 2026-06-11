@@ -16,6 +16,7 @@ pub struct FrameRecorder {
     point_radius: i32,
     trail_decay: f32,
     frame_count: usize,
+    view_radius: f64,
 }
 
 impl FrameRecorder {
@@ -25,6 +26,9 @@ impl FrameRecorder {
         }
         if args.every_steps == 0 {
             return Err("every-steps must be greater than zero".to_string());
+        }
+        if !args.view_radius.is_finite() || args.view_radius < 0.0 {
+            return Err("view-radius must be finite and non-negative".to_string());
         }
 
         let mut frame_dir = PathBuf::from(&args.frames_dir);
@@ -37,8 +41,8 @@ impl FrameRecorder {
         let width = args.width;
         let height = args.height;
         let buffer_len = frame_byte_size(width, height)?;
-        let background = [6, 10, 16];
-        let point_radius = 2;
+        let background = [255, 255, 255];
+        let point_radius = 0;
 
         Ok(Self {
             frame_dir,
@@ -49,8 +53,9 @@ impl FrameRecorder {
             background,
             buffer: vec![0; buffer_len],
             point_radius,
-            trail_decay: 0.88,
+            trail_decay: 0.0,
             frame_count: 0,
+            view_radius: args.view_radius,
         })
     }
 
@@ -68,6 +73,7 @@ impl FrameRecorder {
             return Ok(());
         }
 
+        let bounds = self.render_bounds(bounds);
         self.render_particles(particles, bounds)?;
         let path = self.frame_path();
         self.next_index = self.next_index.saturating_add(1);
@@ -98,6 +104,19 @@ impl FrameRecorder {
         path
     }
 
+    fn render_bounds(&self, autoscale_bounds: (f64, f64, f64, f64)) -> (f64, f64, f64, f64) {
+        if self.view_radius > 0.0 {
+            (
+                -self.view_radius,
+                self.view_radius,
+                -self.view_radius,
+                self.view_radius,
+            )
+        } else {
+            autoscale_bounds
+        }
+    }
+
     fn decay_trails(&mut self) {
         for pixel in self.buffer.chunks_exact_mut(3) {
             pixel[0] = decayed_channel(pixel[0], self.background[0], self.trail_decay);
@@ -121,8 +140,7 @@ impl FrameRecorder {
         let x_dim = usize::try_from(self.width).map_err(|_| "invalid frame width".to_string())?;
         let w = i64::from(self.width);
         let h = i64::from(self.height);
-        let speed_scale = speed_scale(particles);
-        let glow_kernel = glow_kernel(self.point_radius);
+        let dot_kernel = dot_kernel(self.point_radius);
 
         for i in 0..particles.len() {
             let x = particles.x[i];
@@ -133,11 +151,7 @@ impl FrameRecorder {
 
             let px = ((x - x_min) * sx).round() as i64;
             let py = ((y_max - y) * sy).round() as i64;
-            let speed =
-                (particles.vx[i] * particles.vx[i] + particles.vy[i] * particles.vy[i]).sqrt();
-            let color = speed_color(speed, speed_scale);
-
-            for &(dx, dy, falloff) in &glow_kernel {
+            for &(dx, dy, falloff) in &dot_kernel {
                 let xx = px + i64::from(dx);
                 let yy = py + i64::from(dy);
                 if xx < 0 || xx >= w || yy < 0 || yy >= h {
@@ -156,7 +170,7 @@ impl FrameRecorder {
                 if idx + 2 >= self.buffer.len() {
                     continue;
                 }
-                add_glow(&mut self.buffer[idx..idx + 3], color, falloff);
+                stamp_ink(&mut self.buffer[idx..idx + 3], falloff);
             }
         }
 
@@ -164,7 +178,7 @@ impl FrameRecorder {
     }
 }
 
-fn glow_kernel(point_radius: i32) -> Vec<(i32, i32, f32)> {
+fn dot_kernel(point_radius: i32) -> Vec<(i32, i32, f32)> {
     let radius = point_radius as f32 + 0.75;
     let mut kernel = Vec::new();
     for dy in -point_radius..=point_radius {
@@ -184,49 +198,10 @@ fn decayed_channel(value: u8, background: u8, decay: f32) -> u8 {
     faded.max(f32::from(background)).round() as u8
 }
 
-fn speed_scale(particles: &ParticleSoa) -> f64 {
-    let mut speeds = Vec::with_capacity(particles.len());
-    for i in 0..particles.len() {
-        let speed2 = particles.vx[i] * particles.vx[i] + particles.vy[i] * particles.vy[i];
-        if speed2.is_finite() {
-            speeds.push(speed2.sqrt());
-        }
-    }
-    if speeds.is_empty() {
-        return 1.0;
-    }
-    let index = speeds.len().saturating_sub(1) * 95 / 100;
-    let (_, percentile, _) = speeds.select_nth_unstable_by(index, f64::total_cmp);
-    percentile.max(1e-12)
-}
-
-fn speed_color(speed: f64, scale: f64) -> [u8; 3] {
-    let t = (speed / scale).clamp(0.0, 1.0) as f32;
-    if t < 0.55 {
-        let local = t / 0.55;
-        lerp_color([10, 30, 110], [35, 220, 255], local)
-    } else {
-        let local = (t - 0.55) / 0.45;
-        lerp_color([35, 220, 255], [255, 255, 255], local)
-    }
-}
-
-fn lerp_color(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
-    [
-        lerp_channel(a[0], b[0], t),
-        lerp_channel(a[1], b[1], t),
-        lerp_channel(a[2], b[2], t),
-    ]
-}
-
-fn lerp_channel(a: u8, b: u8, t: f32) -> u8 {
-    (f32::from(a) + (f32::from(b) - f32::from(a)) * t).round() as u8
-}
-
-fn add_glow(pixel: &mut [u8], color: [u8; 3], falloff: f32) {
-    for (channel, amount) in pixel.iter_mut().zip(color) {
-        let add = (f32::from(amount) * falloff).round() as u8;
-        *channel = channel.saturating_add(add);
+fn stamp_ink(pixel: &mut [u8], falloff: f32) {
+    for channel in pixel.iter_mut() {
+        let ink = (255.0 * falloff).round() as u8;
+        *channel = channel.saturating_sub(ink);
     }
 }
 
@@ -252,9 +227,53 @@ fn write_ppm(path: &Path, width: u32, height: u32, buffer: &[u8]) -> io::Result<
 }
 
 fn frame_byte_size(width: u32, height: u32) -> Result<usize, String> {
-    let w = usize::try_from(width).map_err(|_| "invalid frame width".to_string())?;
-    let h = usize::try_from(height).map_err(|_| "invalid frame height".to_string())?;
-    w.checked_mul(h)
-        .and_then(|p| p.checked_mul(3))
-        .ok_or_else(|| "frame dimensions too large".to_string())
+    let pixels = (width as usize)
+        .checked_mul(height as usize)
+        .ok_or_else(|| "frame dimensions overflow".to_string())?;
+    pixels
+        .checked_mul(3)
+        .ok_or_else(|| "frame byte size overflow".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FrameRecorder;
+    use crate::config::Args;
+    use clap::Parser;
+
+    fn recorder_args(view_radius: &str, frames_dir: &str) -> Args {
+        let view_arg = format!("--view-radius={view_radius}");
+        Args::parse_from([
+            "nq",
+            "--record",
+            "--frames-dir",
+            frames_dir,
+            "--width",
+            "9",
+            "--height",
+            "9",
+            &view_arg,
+        ])
+    }
+
+    #[test]
+    fn negative_view_radius_is_rejected() {
+        let args = recorder_args("-1.0", ".sc/test-frames-neg");
+        let err = FrameRecorder::new(&args).unwrap_err();
+        assert!(err.contains("view-radius"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn fixed_view_radius_overrides_autoscale_bounds() {
+        let args = recorder_args("2.0", ".sc/test-frames-fixed");
+        let recorder = FrameRecorder::new(&args).unwrap();
+        // Autoscale bounds are ignored when a fixed view radius is set.
+        let bounds = recorder.render_bounds((-100.0, 100.0, -50.0, 50.0));
+        assert_eq!(bounds, (-2.0, 2.0, -2.0, 2.0));
+
+        let args_auto = recorder_args("0.0", ".sc/test-frames-auto");
+        let recorder_auto = FrameRecorder::new(&args_auto).unwrap();
+        let auto = recorder_auto.render_bounds((-100.0, 100.0, -50.0, 50.0));
+        assert_eq!(auto, (-100.0, 100.0, -50.0, 50.0));
+    }
 }

@@ -7,11 +7,80 @@
 
 [Download MP4](./nebula-quanta-barnes_hut.mp4)
 
-The GIF plays the run forward then reversed so it loops seamlessly; the MP4 is the plain forward clip. Source reproduction command (seeded):
+The GIF is a forward loop with the tail crossfaded into the head; the MP4 is the plain forward clip. Exact seeded reproduction command:
 
 ```bash
-./run.sh --preset balanced --n 12000 --steps 600 --dt 0.001 --theta 0.6 --epsilon 0.008 --integrator leapfrog --init rotating-disk --init-radius 1.4 --init-v-amp 0.55 --init-lambda 0.45 --mass-profile lognormal --mass-mean 1.0 --mass-stddev 0.25 --mass-min 0.2 --mass-max 2.0 --seed 466369 --threads 1 --frames-dir captured_run_ker --width 1280 --height 720 --fps 30 --every-steps 1 --gif
+target/release/nq --n 8000 --steps 718 --dt 0.00014 --theta 0.7 --epsilon 0.005 --init plummer --init-radius 1 --init-v-amp 65.9350324501817 --mass-profile lognormal --mass-stddev 0.5 --mass-min 0.2 --mass-max 5 --seed 1902 --integrator leapfrog --view-radius 4.0 --threads 1 --energy-drift off --width 1280 --height 720 --record --frames-dir .sc/h09-final/frames --fps 30 --every-steps 2
 ```
+
+## What you are looking at
+
+Newton can tell you exactly how two bodies orbit each other. Add a third and
+there is no formula anymore — the only way to know where things end up is to
+compute every gravitational pull and step time forward in small increments.
+That is an N-body simulation: here, 8000 point masses, each attracting all
+the others, advanced step by step with a leapfrog integrator (a scheme that
+respects the energy bookkeeping of orbital motion far better than naive
+stepping).
+
+The clip shows a classic experiment from stellar dynamics: **cold collapse**.
+The bodies start as a fuzzy round cloud (a Plummer profile) with too little
+motion to hold itself up — its kinetic energy is only 30% of what equilibrium
+would need (virial ratio 2K/|W| = 0.30). Gravity wins. The cloud falls in on
+itself, the infall overshoots, and in a few crossing times the system
+"violently relaxes": most bodies settle into a dense core while the energy
+they shed ejects others into a sparse halo. The same physics — collapse,
+relaxation, core-plus-halo — shapes real star clusters; this is a miniature
+of it. Every black dot is one body, drawn in a fixed window so you watch the
+collapse instead of a zooming camera.
+
+The run is fully deterministic: same seed, same machine ordering, same frames.
+These are the exact parameters behind the clip:
+
+| Parameter | Value | Meaning |
+| --- | --- | --- |
+| N | 8000 | bodies |
+| 2K/\|W\| | 0.30 | initial kinetic/virial energy — "cold", so it collapses |
+| dt | 1.4e-4 | integration time step |
+| epsilon | 5e-3 | force softening, ~0.08x the mean particle spacing |
+| theta | 0.7 | Barnes–Hut opening angle (accuracy/speed knob) |
+| integrator | leapfrog | symplectic second-order scheme |
+| seed | 1902 | RNG seed for the initial cloud |
+| view radius | 4 | fixed half-width of the camera window |
+
+## How Barnes–Hut makes it fast
+
+The honest way to compute gravity is to sum every pair: 8000 bodies means
+~32 million force pairs, every step, for 718 steps. That direct sum is in
+this repo (it serves as the accuracy baseline), but it scales as N², which
+is what stops most naive simulations cold.
+
+Barnes–Hut trades a little accuracy for a lot of speed. Each step, space is
+split recursively into four quadrants (a **quadtree** — the 2D version of
+the octree used in 3D) until every leaf holds one body. Each internal node
+stores the total mass and center of mass of everything below it. When the
+force on a body is evaluated, the tree is walked from the root: a far-away
+node that looks small from the body's position (its size divided by its
+distance is below theta = 0.7) is treated as a single lumped mass and its
+entire subtree is skipped. Only nearby regions get opened down to individual
+bodies. The cost drops from N² to roughly N·log N, and theta gives you a
+dial between "fast" and "accurate" — at theta 0, Barnes–Hut *is* the direct
+sum, and the test suite verifies exactly that.
+
+The implementation keeps the hot loop boring on purpose:
+
+- bodies live in flat parallel arrays (positions, velocities, masses — a
+  structure-of-arrays layout the CPU prefetcher loves), not in objects;
+- the quadtree is a pre-allocated node pool sized before the run starts —
+  the force loop performs zero heap allocations;
+- tree traversal uses an explicit reusable stack, not recursion;
+- every run prints its own telemetry (the hero run uses 408 bytes per body
+  and fills 90% of its node pool), so the memory claims above are printed,
+  not promised.
+
+On the benchmark machine the full pipeline — build the tree, evaluate all
+8000 forces, integrate, and write a 1280x720 frame — runs at ~52 steps per
+second single-threaded.
 
 `nq` is a focused Barnes–Hut N-body simulation CLI in Rust.
 It is built for fast, memory-frugal runs with a deterministic direct-force baseline.
