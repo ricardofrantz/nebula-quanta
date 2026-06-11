@@ -10,6 +10,12 @@
 
 [Download MP4](./nebula-quanta-barnes_hut.mp4)
 
+The GIF plays the run forward then reversed so it loops seamlessly; the MP4 is the plain forward clip. Source reproduction command (seeded):
+
+```bash
+./run.sh --preset balanced --n 12000 --steps 600 --dt 0.001 --theta 0.6 --epsilon 0.008 --integrator leapfrog --init rotating-disk --init-radius 1.4 --init-v-amp 0.55 --init-lambda 0.45 --mass-profile lognormal --mass-mean 1.0 --mass-stddev 0.25 --mass-min 0.2 --mass-max 2.0 --seed 466369 --threads 1 --frames-dir captured_run_ker --width 1280 --height 720 --fps 30 --every-steps 1 --gif
+```
+
 `nq` is a focused Barnes–Hut N-body simulation CLI in Rust.
 It is built for fast, memory-frugal runs with a deterministic direct-force baseline.
 The short executable name is `nq` and the Rust crate is `nebula-quanta`.
