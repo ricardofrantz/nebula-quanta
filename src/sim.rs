@@ -729,6 +729,12 @@ mod tests {
     const POSITION_TOLERANCE_FACTOR: f64 = 1.0e-3;
     const ENERGY_DRIFT_TOLERANCE: f64 = 1.0e-6;
 
+    const ENERGY_REGRESSION_N: usize = 512;
+    const ENERGY_REGRESSION_STEPS: usize = 500;
+    const ENERGY_REGRESSION_DT: f64 = 0.001;
+    const ENERGY_REGRESSION_THETA: f64 = 0.5;
+    const ENERGY_REGRESSION_EPSILON: f64 = 0.01;
+
     #[derive(Clone, Copy)]
     struct KeplerCase {
         name: &'static str,
@@ -832,6 +838,92 @@ mod tests {
         compute_energy_snapshot(particles, KEPLER_EPSILON, KEPLER_G, 0.0, true, 0)
             .expect("two-body energy snapshot should be available")
             .total
+    }
+
+    fn regression_energy(particles: &ParticleSoa, args: &Args) -> f64 {
+        compute_energy_snapshot(particles, args.epsilon, args.g, 0.0, true, args.seed)
+            .expect("regression energy snapshot should be available")
+            .total
+    }
+
+    fn energy_regression_args(init: &str, seed: u64) -> Args {
+        let n_s = ENERGY_REGRESSION_N.to_string();
+        let steps_s = ENERGY_REGRESSION_STEPS.to_string();
+        let dt_s = ENERGY_REGRESSION_DT.to_string();
+        let theta_s = ENERGY_REGRESSION_THETA.to_string();
+        let epsilon_s = ENERGY_REGRESSION_EPSILON.to_string();
+        let seed_s = seed.to_string();
+
+        Args::parse_from([
+            "nq",
+            "--n",
+            n_s.as_str(),
+            "--init",
+            init,
+            "--steps",
+            steps_s.as_str(),
+            "--dt",
+            dt_s.as_str(),
+            "--theta",
+            theta_s.as_str(),
+            "--epsilon",
+            epsilon_s.as_str(),
+            "--integrator",
+            "leapfrog",
+            "--seed",
+            seed_s.as_str(),
+            "--threads",
+            "1",
+            "--energy-drift",
+            "on",
+        ])
+    }
+
+    fn assert_energy_drift_regression(
+        case_name: &str,
+        init: &str,
+        seed: u64,
+        threshold: f64,
+    ) -> Result<(), String> {
+        let args = energy_regression_args(init, seed);
+        let mut particles = ParticleSoa::random_with_profiles(
+            args.n,
+            args.seed,
+            args.init,
+            args.init_radius,
+            args.init_spread,
+            args.init_v_amp,
+            args.init_lambda,
+            args.init_center_x,
+            args.init_center_y,
+            args.mass_profile,
+            args.mass_mean,
+            args.mass_stddev,
+            args.mass_min,
+            args.mass_max,
+            args.mass_alpha,
+        );
+        let initial_energy = regression_energy(&particles, &args);
+
+        run_barnes_hut(&mut particles, &args, None)?;
+
+        let final_energy = regression_energy(&particles, &args);
+        let relative_energy_drift = (final_energy - initial_energy).abs() / initial_energy.abs();
+        eprintln!(
+            "energy_drift_regression case={} init={} seed={} relative_energy_drift={:.15} threshold={:.15}",
+            case_name, init, seed, relative_energy_drift, threshold
+        );
+        assert!(
+            relative_energy_drift < threshold,
+            "energy regression case={} init={} seed={} relative energy drift {} exceeds {}",
+            case_name,
+            init,
+            seed,
+            relative_energy_drift,
+            threshold
+        );
+
+        Ok(())
     }
 
     fn max_position_error(particles: &ParticleSoa, expected: [(f64, f64); 2]) -> f64 {
@@ -943,6 +1035,33 @@ mod tests {
             },
             "barnes_hut",
             1.0e-6,
+        )
+    }
+
+    #[test]
+    fn energy_drift_plummer_seed_42_regression() -> Result<(), String> {
+        // Baseline measured 2026-06-11: |energy_drift_rel| = 0.997984882458993
+        // (3/3 repeated runs were bit-identical); threshold is 3x baseline.
+        assert_energy_drift_regression("plummer_seed_42", "plummer", 42, 2.993954647376979)
+    }
+
+    #[test]
+    fn energy_drift_plummer_seed_1337_regression() -> Result<(), String> {
+        // Baseline measured 2026-06-11: |energy_drift_rel| = 0.939209763986541
+        // (3/3 repeated runs were bit-identical); threshold is 3x baseline.
+        assert_energy_drift_regression("plummer_seed_1337", "plummer", 1337, 2.817629291959623)
+    }
+
+    #[test]
+    fn energy_drift_rotating_disk_seed_42_regression() -> Result<(), String> {
+        // Disk case uses the rotating-disk initializer. Baseline measured
+        // 2026-06-11: |energy_drift_rel| = 0.979700299946477 (3/3 repeated
+        // runs were bit-identical); threshold is 3x baseline.
+        assert_energy_drift_regression(
+            "rotating_disk_seed_42",
+            "rotating-disk",
+            42,
+            2.939100899839431,
         )
     }
 
