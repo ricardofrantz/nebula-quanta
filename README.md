@@ -11,7 +11,7 @@ the others, advanced step by step with a leapfrog integrator (a scheme that
 respects the energy bookkeeping of orbital motion far better than naive
 stepping).
 
-[![Watch the simulation](./nebula-quanta-barnes_hut.gif)](./nebula-quanta-barnes_hut.mp4)
+[![Watch the simulation](./assets/hero-cold-collapse.gif)](./assets/hero-cold-collapse.mp4)
 
 The clip shows a classic experiment from stellar dynamics: **cold collapse**.
 The bodies start as a fuzzy round cloud (a Plummer profile) with too little
@@ -45,7 +45,7 @@ target/release/nq --n 20000 --steps 718 --dt 0.00014 --theta 0.7 --epsilon 0.005
 ```
 
 The GIF is a forward loop with the tail crossfaded into the head; the
-[MP4](./nebula-quanta-barnes_hut.mp4) is the plain forward clip.
+[MP4](./assets/hero-cold-collapse.mp4) is the plain forward clip.
 
 ## How Barnes–Hut makes it fast
 
