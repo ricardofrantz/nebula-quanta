@@ -98,10 +98,31 @@ pre-pf3 low-N `threads=4` rows matched `--threads 1` within run-to-run noise.
 | rev 3 | tree build | 1,000 | 1 | 64.602 µs | `1.13 1.35 0.83` |
 | rev 3 | tree build | 1,000 | 12 | 198.97 µs | `1.13 1.35 0.83` |
 
+- 2026-06-12 post-p43 note: the prefix-partition build also changed the node-pool layout (bucket-contiguous subtrees), which improved FORCE traversal locality — the production bh_force rows at N=100k now measure 109.4 ms (1 thread) and 10.5 ms (12 threads) vs the 267.30/24.126 ms rows in the pf3 section above; those pf3 rows are the pre-p43-layout baseline (supervisor-verified, loadavg 0.97).
 - Supervisor verdict (final, after rev 3): accepted as the best honest state. The literal >=4x-vs-same-code-serial criterion reads 2.02x, but only because the serial build itself got 2.4x faster during the work (34.5 ms -> 14.7 ms at N=100k); in absolute terms the 12-thread build at 7.28 ms beats the original target's implied bound (34.5 ms / 4 = 8.6 ms), and against the bead-start serial baseline the threaded build is 4.7x. Supervisor re-bench (loadavg `0.59`) reproduced 15.6 ms / 7.04 ms. Physics: serial and 12-thread runs are bitwise-identical to the pre-change commit over a 20-step N=10k A/B. Known trade-off: threaded build is slower than serial build below ~10k particles (N=1k: 199 µs vs 65 µs); a measured small-N build crossover is filed as follow-up.
 
 - Rev 2 supervisor verification (loadavg `0.60`): 28.362 ms / 8.587 ms = 3.30x reproduced; serial and 12-thread runs produce bitwise-identical physics to the pre-change commit over a 20-step N=10k A/B (positions and momenta compared at full precision).
 - Rev 3 verdict: leaf-bucket scheduling is in place and parity remains green, but the original >=4x target is still not met on this run. Known trade-off remains: at N=1k the threaded build is slower than serial build, though force-eval gains can keep `--threads 12` a net win.
+
+## f32 render-mode BH force decision (nebula-quanta-d4f)
+
+- Date: 2026-06-12
+- Machine: AMD Ryzen 9 9900X 12-Core Processor; 18 CPUs visible (`lscpu`: 1 thread/core, 1 socket)
+- Decision command: `cargo bench --bench nbody -- bh_force_precision_decision 2>&1 | tee .sc/nebula-quanta-d4f.decision3.log`
+- Load at decision start: `/proc/loadavg` = `0.10 1.32 1.32 1/1404 3418944`
+- Rev-2 candidate method: bench-only scalar f32 Barnes-Hut force traversal over genuine f32 storage mirrors. The setup mirrors `ParticleSoa` x/y/m into f32 arrays and casts the already-built production tree's node geometry, COM, mass, body index, and children into an f32 node array once, outside the timed loop; the hot traversal then performs f32 loads/math without per-element f64-to-f32 casts. No CLI flag was plumbed for this decision run.
+- Baseline reconciliation: the decision f64 rows call the production `compute_accel_barnes_hut_with_threshold` kernel with the same N=100k Plummer fixture, built tree, `theta=0.7`, `epsilon=0.01`, `G=1.0`, thread counts, threshold, and acceleration buffers as the `bh_force` Criterion group. A same-binary check of `cargo bench --bench nbody -- 'bh_force/threads=(1|12)/100000'` measured 108.26 ms (1 thread) and 10.297 ms (12 threads), matching the decision f64 rows. The older 267.30 ms BENCHMARKS.md production row is therefore a historical cross-run/pre-current-code result, not the current production baseline for this decision.
+- Supervisor correction (review finding): the rev-2 f32 mirror initially used `max(x_width, y_width)` for the opening test while production `Node::size()` uses the x extent only, biasing the candidate toward opening more nodes. With the criterion mirrored exactly (and the bench re-run at loadavg `0.47`), f32 measures slightly FASTER than f64 — but still far below the ship bar.
+- Ship/no-ship verdict: **no win — flag not shipped**. The acceptance threshold was f32 >=1.5x faster than f64 at N=100k for both 1 and 12 threads; corrected speedups are 1.08x at 1 thread and 1.09x at 12 threads. Scalar f32 was below the optional f32x8 trigger at the time it was evaluated; a SIMD candidate remains unexplored (noted, not promised).
+
+| Group | N | Threads | f64 median | f32 median | f32/f64 speedup | Loadavg |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| bh_force_precision_decision rev 2 (corrected) | 100,000 | 1 | 111.92 ms | 103.81 ms | 1.08x | `0.47` |
+| bh_force_precision_decision rev 2 (corrected) | 100,000 | 12 | 11.133 ms | 10.165 ms | 1.09x | `0.47` |
+
+Because the decision failed on a caveat-free f32-storage measurement (production
+kernel baseline, identical traversal), the f32 render path and CLI plumbing were
+not pursued; f64 remains the only shipped/default physics path.
 
 ## Direct-force SIMD honesty decision (nebula-quanta-0nn)
 
