@@ -26,11 +26,11 @@ log_file="${script_dir}/${name}.log"
 
 # Scale from gallery-galaxy-disk-1m-v2:
 # - 2x particles for a smoother disk.
-# - 2x simulated duration at the same sampling cadence: 101 frames at 30 fps.
+# - Same simulated duration at the same sampling cadence: 51 frames at 30 fps.
 # - 4K frame size for inspection on a desktop display.
 # - Half the 1M per-particle mass so total simulated mass stays comparable.
 n=2000000
-steps=6000
+steps=3000
 dt=0.000003
 theta=0.7
 epsilon=0.005
