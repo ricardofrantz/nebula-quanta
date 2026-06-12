@@ -89,8 +89,10 @@ pub struct Args {
     pub validate: bool,
     #[arg(long)]
     pub record: bool,
-    #[arg(long, default_value = "frames")]
-    pub frames_dir: String,
+    #[arg(long, conflicts_with = "output")]
+    pub frames_dir: Option<String>,
+    #[arg(long, conflicts_with = "frames_dir")]
+    pub output: Option<String>,
     #[arg(long, default_value_t = 1920)]
     pub width: u32,
     #[arg(long, default_value_t = 1080)]
@@ -401,6 +403,20 @@ mod tests {
             fixed_args.epsilon_for_step(0, 1000, Some((-1.0, 1.0, -1.0, 1.0)),),
             0.02
         );
+    }
+
+    #[test]
+    fn output_and_frames_dir_conflict() {
+        let err = Args::try_parse_from([
+            "nq",
+            "--record",
+            "--output",
+            "out.mp4",
+            "--frames-dir",
+            "frames",
+        ])
+        .unwrap_err();
+        assert!(err.to_string().contains("cannot be used"));
     }
 
     #[test]

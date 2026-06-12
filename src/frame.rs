@@ -1,12 +1,13 @@
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Child, ChildStdin, Command, Stdio};
 
 use crate::{config::Args, particle::ParticleSoa};
 
 #[derive(Debug)]
 pub struct FrameRecorder {
-    frame_dir: PathBuf,
+    sink: FrameSink,
     width: u32,
     height: u32,
     every_steps: usize,
@@ -31,21 +32,22 @@ impl FrameRecorder {
             return Err("view-radius must be finite and non-negative".to_string());
         }
 
-        let mut frame_dir = PathBuf::from(&args.frames_dir);
-        if frame_dir.as_os_str().is_empty() {
-            frame_dir.push("frames");
-        }
-        fs::create_dir_all(&frame_dir)
-            .map_err(|err| format!("unable to create frame directory: {err}"))?;
-
         let width = args.width;
         let height = args.height;
         let buffer_len = frame_byte_size(width, height)?;
+        let sink = if let Some(output) = &args.output {
+            FrameSink::Ffmpeg(FfmpegSink::spawn(output, width, height, args.fps)?)
+        } else {
+            let frame_dir = PathBuf::from(args.frames_dir.as_deref().unwrap_or("frames"));
+            fs::create_dir_all(&frame_dir)
+                .map_err(|err| format!("unable to create frame directory: {err}"))?;
+            FrameSink::Ppm { frame_dir }
+        };
         let background = [0, 0, 0];
         let point_radius = 0;
 
         Ok(Self {
-            frame_dir,
+            sink,
             width,
             height,
             every_steps: args.every_steps,
@@ -75,10 +77,16 @@ impl FrameRecorder {
 
         let bounds = self.render_bounds(bounds);
         self.render_particles(particles, bounds)?;
-        let path = self.frame_path();
+        let frame_index = self.next_index;
         self.next_index = self.next_index.saturating_add(1);
-        write_ppm(&path, self.width, self.height, &self.buffer)
-            .map_err(|err| format!("unable to write frame {}: {err}", self.next_index - 1))?;
+        match &mut self.sink {
+            FrameSink::Ppm { frame_dir } => {
+                let path = frame_path(frame_dir, frame_index);
+                write_ppm(&path, self.width, self.height, &self.buffer)
+                    .map_err(|err| format!("unable to write frame {frame_index}: {err}"))?;
+            }
+            FrameSink::Ffmpeg(sink) => sink.write_frame(&self.buffer)?,
+        }
         self.frame_count = self.frame_count.saturating_add(1);
         Ok(())
     }
@@ -87,21 +95,24 @@ impl FrameRecorder {
         self.frame_count
     }
 
-    pub fn render_command(&self, output: &str, fps: u32) -> String {
-        format!(
-            "ffmpeg -y -framerate {fps} -i {}/frame_%06d.ppm -s {}x{} -c:v libx264 -pix_fmt yuv420p {}",
-            self.frame_dir.display(),
-            self.width,
-            self.height,
-            output
-        )
+    pub fn finish(&mut self) -> Result<(), String> {
+        if let FrameSink::Ffmpeg(sink) = &mut self.sink {
+            sink.finish()?;
+        }
+        Ok(())
     }
 
-    fn frame_path(&self) -> PathBuf {
-        let mut path = self.frame_dir.clone();
-        let index = self.next_index;
-        path.push(format!("frame_{index:06}.ppm"));
-        path
+    pub fn render_command(&self, output: &str, fps: u32) -> Option<String> {
+        match &self.sink {
+            FrameSink::Ppm { frame_dir } => Some(format!(
+                "ffmpeg -y -framerate {fps} -i {}/frame_%06d.ppm -s {}x{} -c:v libx264 -crf 0 -pix_fmt yuv444p {}",
+                frame_dir.display(),
+                self.width,
+                self.height,
+                output
+            )),
+            FrameSink::Ffmpeg(_) => None,
+        }
     }
 
     fn render_bounds(&self, autoscale_bounds: (f64, f64, f64, f64)) -> (f64, f64, f64, f64) {
@@ -207,6 +218,130 @@ fn stamp_ink(pixel: &mut [u8], falloff: f32) {
     }
 }
 
+#[derive(Debug)]
+enum FrameSink {
+    Ppm { frame_dir: PathBuf },
+    Ffmpeg(FfmpegSink),
+}
+
+#[derive(Debug)]
+struct FfmpegSink {
+    child: Option<Child>,
+    stdin: Option<ChildStdin>,
+    output: String,
+    finished: bool,
+}
+
+impl FfmpegSink {
+    fn spawn(output: &str, width: u32, height: u32, fps: u32) -> Result<Self, String> {
+        Self::spawn_with_program("ffmpeg", output, width, height, fps)
+    }
+
+    fn spawn_with_program(
+        program: &str,
+        output: &str,
+        width: u32,
+        height: u32,
+        fps: u32,
+    ) -> Result<Self, String> {
+        let mut child = Command::new(program)
+            .args([
+                // stderr is piped but only drained after the run completes
+                // (wait_with_output); keep ffmpeg quiet on the happy path so
+                // its periodic progress output cannot fill the pipe buffer
+                // and deadlock long renders against our stdin writes.
+                "-hide_banner",
+                "-nostats",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "rgb24",
+                "-s",
+                &format!("{width}x{height}"),
+                "-framerate",
+                &fps.to_string(),
+                "-i",
+                "-",
+                "-c:v",
+                "libx264",
+                "-crf",
+                "0",
+                "-pix_fmt",
+                "yuv444p",
+                output,
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|err| {
+                format!(
+                    "unable to start ffmpeg for streamed recording: {err}; install ffmpeg and ensure it is on PATH"
+                )
+            })?;
+
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| "unable to open ffmpeg stdin for streamed recording".to_string())?;
+
+        Ok(Self {
+            child: Some(child),
+            stdin: Some(stdin),
+            output: output.to_string(),
+            finished: false,
+        })
+    }
+
+    fn write_frame(&mut self, buffer: &[u8]) -> Result<(), String> {
+        let stdin = self
+            .stdin
+            .as_mut()
+            .ok_or_else(|| "ffmpeg stdin is already closed".to_string())?;
+        stdin
+            .write_all(buffer)
+            .map_err(|err| format!("unable to stream frame to ffmpeg: {err}"))
+    }
+
+    fn finish(&mut self) -> Result<(), String> {
+        if self.finished {
+            return Ok(());
+        }
+        if let Some(mut stdin) = self.stdin.take() {
+            stdin
+                .flush()
+                .map_err(|err| format!("unable to flush ffmpeg stdin: {err}"))?;
+        }
+        let child = self
+            .child
+            .take()
+            .ok_or_else(|| "ffmpeg child is already closed".to_string())?;
+        let output = child
+            .wait_with_output()
+            .map_err(|err| format!("unable to wait for ffmpeg: {err}"))?;
+        self.finished = true;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!(
+                "ffmpeg failed while writing {} with status {}: {}",
+                self.output,
+                output.status,
+                stderr.trim()
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn frame_path(frame_dir: &Path, index: usize) -> PathBuf {
+    let mut path = frame_dir.to_path_buf();
+    path.push(format!("frame_{index:06}.ppm"));
+    path
+}
+
 fn write_ppm(path: &Path, width: u32, height: u32, buffer: &[u8]) -> io::Result<()> {
     let expected = frame_byte_size(width, height).map_err(|err| {
         io::Error::new(
@@ -239,9 +374,12 @@ fn frame_byte_size(width: u32, height: u32) -> Result<usize, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::FrameRecorder;
+    use super::{FfmpegSink, FrameRecorder};
     use crate::config::Args;
     use clap::Parser;
+    use std::fs;
+    use std::io::Write;
+    use std::path::Path;
 
     fn recorder_args(view_radius: &str, frames_dir: &str) -> Args {
         let view_arg = format!("--view-radius={view_radius}");
@@ -258,11 +396,81 @@ mod tests {
         ])
     }
 
+    fn write_executable(path: &Path, body: &str) {
+        let mut file = fs::File::create(path).expect("create fake ffmpeg");
+        file.write_all(body.as_bytes()).expect("write fake ffmpeg");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = file.metadata().expect("fake metadata").permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(path, permissions).expect("chmod fake ffmpeg");
+        }
+    }
+
     #[test]
     fn negative_view_radius_is_rejected() {
         let args = recorder_args("-1.0", ".sc/test-frames-neg");
         let err = FrameRecorder::new(&args).unwrap_err();
         assert!(err.contains("view-radius"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn ffmpeg_missing_returns_actionable_error() {
+        let err = FfmpegSink::spawn_with_program(
+            ".sc/no-such-ffmpeg-for-test",
+            ".sc/missing-output.mp4",
+            2,
+            2,
+            30,
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("unable to start ffmpeg"),
+            "unexpected error: {err}"
+        );
+        assert!(err.contains("PATH"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn ffmpeg_nonzero_exit_is_propagated() {
+        fs::create_dir_all(".sc/frame-tests").expect("create test dir");
+        let ffmpeg = Path::new(".sc/frame-tests/fake-ffmpeg-fail");
+        write_executable(
+            ffmpeg,
+            "#!/bin/sh\ncat >/dev/null\necho fake failure >&2\nexit 17\n",
+        );
+        let mut sink = FfmpegSink::spawn_with_program(
+            ffmpeg.to_str().unwrap(),
+            ".sc/frame-tests/fail.mp4",
+            2,
+            2,
+            30,
+        )
+        .expect("spawn fake ffmpeg");
+        sink.write_frame(&[0; 12]).expect("write frame");
+        let err = sink.finish().unwrap_err();
+        assert!(err.contains("ffmpeg failed"), "unexpected error: {err}");
+        assert!(err.contains("fake failure"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn ffmpeg_finish_flushes_and_waits() {
+        fs::create_dir_all(".sc/frame-tests").expect("create test dir");
+        let ffmpeg = Path::new(".sc/frame-tests/fake-ffmpeg-ok");
+        let raw = ".sc/frame-tests/raw.rgb";
+        write_executable(ffmpeg, &format!("#!/bin/sh\ncat > {raw}\nexit 0\n"));
+        let mut sink = FfmpegSink::spawn_with_program(
+            ffmpeg.to_str().unwrap(),
+            ".sc/frame-tests/ok.mp4",
+            2,
+            2,
+            30,
+        )
+        .expect("spawn fake ffmpeg");
+        sink.write_frame(&[1; 12]).expect("write frame");
+        sink.finish().expect("finish fake ffmpeg");
+        assert_eq!(fs::read(raw).expect("read raw"), vec![1; 12]);
     }
 
     #[test]

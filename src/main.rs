@@ -67,8 +67,8 @@ fn main() {
         Ok(Some(recorder)) => Some(recorder),
         Ok(None) => None,
         Err(err) => {
-            eprintln!("recording disabled: {err}");
-            None
+            eprintln!("recording failed: {err}");
+            return;
         }
     };
 
@@ -88,6 +88,15 @@ fn main() {
             );
             return;
         }
+    };
+
+    let result = match (result, recorder.as_mut().map(FrameRecorder::finish)) {
+        (Ok(_value), Some(Err(err))) => Err(err),
+        (Ok(value), _) => Ok(value),
+        (Err(err), Some(Err(finish_err))) => Err(format!(
+            "{err}; additionally recording finalization failed: {finish_err}"
+        )),
+        (Err(err), _) => Err(err),
     };
 
     match result {
@@ -230,11 +239,15 @@ fn main() {
                 let output_name = PathBuf::from(format!("nebula-quanta-{}.mp4", mode_name))
                     .to_string_lossy()
                     .into_owned();
-                println!(
-                    "record_frames={} render_cmd=\"{}\"",
-                    recorder.frame_count(),
-                    recorder.render_command(&output_name, args.fps),
-                );
+                if let Some(render_command) = recorder.render_command(&output_name, args.fps) {
+                    println!(
+                        "record_frames={} render_cmd=\"{}\"",
+                        recorder.frame_count(),
+                        render_command,
+                    );
+                } else {
+                    println!("record_frames={} output=streamed", recorder.frame_count());
+                }
             }
         }
         Err(err) => {

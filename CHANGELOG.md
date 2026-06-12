@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `--record --output <file.mp4>` streams raw RGB frames straight into an ffmpeg child process — no PPM intermediates on disk (a long high-resolution render previously needed tens of GB of temporary frames). The `--frames-dir` PPM path remains as a fallback; the two flags are mutually exclusive. Missing ffmpeg or a failed encode surface as clean errors.
 - Criterion benchmark suite (`cargo bench`) for tree build, Barnes-Hut force, and direct force, with a recorded baseline in `BENCHMARKS.md`; the crate now also exposes a library target.
 - Two-body Kepler analytical oracle tests: leapfrog verified against closed-form circular orbits (position and energy-conservation bounds).
 

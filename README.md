@@ -41,7 +41,7 @@ These are the exact parameters behind the clip:
 | view radius | 4 | fixed half-width of the camera window |
 
 ```bash
-target/release/nq --n 20000 --steps 718 --dt 0.00014 --theta 0.7 --epsilon 0.005 --init plummer --init-radius 1 --init-v-amp 104.78571196775347 --mass-profile lognormal --mass-stddev 0.5 --mass-min 0.2 --mass-max 5 --seed 1902 --integrator leapfrog --view-radius 4.0 --threads 1 --energy-drift off --width 1984 --height 794 --record --frames-dir capture --fps 30 --every-steps 2
+target/release/nq --n 20000 --steps 718 --dt 0.00014 --theta 0.7 --epsilon 0.005 --init plummer --init-radius 1 --init-v-amp 104.78571196775347 --mass-profile lognormal --mass-stddev 0.5 --mass-min 0.2 --mass-max 5 --seed 1902 --integrator leapfrog --view-radius 4.0 --threads 1 --energy-drift off --width 1984 --height 794 --record --output hero-cold-collapse.mp4 --fps 30 --every-steps 2
 ```
 
 The GIF is a forward loop with the tail crossfaded into the head; the
@@ -165,24 +165,24 @@ bun run nq \
 
 ## High-definition + high-FPS workflow
 
-Use `--record` to export raw PPM frames and then encode with `ffmpeg`:
+Use `--record --output out.mp4` to stream raw RGB frames directly into `ffmpeg`:
 
 ```bash
 bun run nq \
   -- --mode=barnes_hut --n 20000 --steps 400 --dt 0.0008 --theta 0.7 \
-  --record --frames-dir ./capture --width 1920 --height 1080 --fps 60 --every-steps 1
+  --record --output nebula-quanta-barnes_hut.mp4 --width 1920 --height 1080 --fps 60 --every-steps 1
 ```
 
-The run prints `record_frames` and a ready-to-run `render_cmd`, for example:
+The fallback PPM path still works with `--record --frames-dir ./capture`. It prints `record_frames` and a ready-to-run `render_cmd`, for example:
 
 ```text
-record_frames=401 render_cmd="ffmpeg -y -framerate 60 -i capture/frame_%06d.ppm -s 1920x1080 -c:v libx264 -pix_fmt yuv420p nebula-quanta-barnes_hut.mp4"
+record_frames=401 render_cmd="ffmpeg -y -framerate 60 -i capture/frame_%06d.ppm -s 1920x1080 -c:v libx264 -crf 0 -pix_fmt yuv444p nebula-quanta-barnes_hut.mp4"
 ```
 
 For very long runs, reduce I/O using `--every-steps K` and keep K tuned to your target duration.
 
 ```bash
-ffmpeg -y -framerate 60 -i capture/frame_%06d.ppm -c:v libx264 -pix_fmt yuv420p nebula-quanta-barnes_hut.mp4
+ffmpeg -y -framerate 60 -i capture/frame_%06d.ppm -c:v libx264 -crf 0 -pix_fmt yuv444p nebula-quanta-barnes_hut.mp4
 ```
 
 `./run.sh` prints the render path automatically:
@@ -236,7 +236,7 @@ The run should produce around `ceil(steps / every_steps)` frames.
 After capture, render with:
 
 ```bash
-ffmpeg -y -framerate 30 -i captured_run/frame_%06d.ppm -c:v libx264 -pix_fmt yuv420p nebula-quanta-long.mp4
+ffmpeg -y -framerate 30 -i captured_run/frame_%06d.ppm -c:v libx264 -crf 0 -pix_fmt yuv444p nebula-quanta-long.mp4
 ```
 
 `--preset` presets are defaults in the launcher and can be overridden with direct flags:
