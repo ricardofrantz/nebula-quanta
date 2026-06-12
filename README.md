@@ -47,6 +47,53 @@ target/release/nq --n 20000 --steps 718 --dt 0.00014 --theta 0.7 --epsilon 0.005
 The GIF is a forward loop with the tail crossfaded into the head; the
 [MP4](./assets/hero-cold-collapse.mp4) is the plain forward clip.
 
+## Gallery
+
+| Clip | GIF | MP4 | Bodies | Precision | Resolution | Frames | Wall-clock | MP4 encode |
+| --- | --- | --- | ---: | --- | --- | ---: | ---: | --- |
+| 1M-body disk instability / clump formation (v2) | [GIF](./assets/gallery-galaxy-disk-1m-v2.gif) | [MP4](./assets/gallery-galaxy-disk-1m-v2.mp4) | 1,000,000 | f64 | 1920x1080 | 51 | 15m18.548s | rev-2 unchanged |
+| Two-galaxy merger (v3) | [GIF](./assets/gallery-merger-1m-v3.gif) | [MP4](./assets/gallery-merger-1m-v3.mp4) | 1,000,000 | f64 | 1920x1080 | 201 | 35m14.060s | H.264 CRF 28 |
+
+Both gallery clips keep the total simulated mass near the validated 20k-body
+recipes by scaling the 1M-body particle masses to mean 0.02. The disk clip
+shows disk instability and clump formation rather than stable spiral arms. The
+GIFs are preview loops with crossfaded tails; the MP4s are the plain forward
+renders.
+
+### 1M-body disk instability v2 command
+
+| Parameter | Value |
+| --- | --- |
+| N | 1,000,000 |
+| dt | 3.0e-6 |
+| steps | 3000 |
+| epsilon | 5.0e-3 |
+| theta | 0.7 |
+| init | galaxy-disk |
+| mass profile | lognormal, mean 0.02, stddev 0.005, clamp [0.01, 0.04] |
+| seed | 424242 |
+
+```bash
+target/release/nq --n 1000000 --steps 3000 --dt 0.000003 --theta 0.7 --epsilon 0.005 --init galaxy-disk --init-radius 1.0 --disk-scale-length 0.25 --disk-dispersion 0.04 --mass-profile lognormal --mass-mean 0.02 --mass-stddev 0.005 --mass-min 0.01 --mass-max 0.04 --seed 424242 --integrator leapfrog --view-radius 1.4 --threads 12 --energy-drift off --width 1920 --height 1080 --record --output assets/gallery-galaxy-disk-1m-v2.mp4 --fps 30 --every-steps 60
+```
+
+### Two-galaxy merger v3 command
+
+| Parameter | Value |
+| --- | --- |
+| N | 1,000,000 |
+| dt | 2.0e-5 |
+| steps | 6000 |
+| epsilon | 2.0e-2 |
+| theta | 0.7 |
+| init | merger |
+| mass profile | lognormal, mean 0.02, stddev 0.005, clamp [0.01, 0.04] |
+| seed | 271828 |
+
+```bash
+target/release/nq --n 1000000 --steps 6000 --dt 0.00002 --theta 0.7 --epsilon 0.02 --init merger --init-radius 1.0 --disk-scale-length 0.25 --disk-dispersion 0.04 --merger-mass-ratio 0.75 --merger-separation 3.0 --merger-impact-parameter 0.5 --merger-spin prograde --mass-profile lognormal --mass-mean 0.02 --mass-stddev 0.005 --mass-min 0.01 --mass-max 0.04 --seed 271828 --integrator leapfrog --view-radius 3.4 --threads 12 --energy-drift off --width 1920 --height 1080 --record --output assets/gallery-merger-1m-v3.mp4 --fps 30 --every-steps 30
+```
+
 ## How Barnes–Hut makes it fast
 
 The honest way to compute gravity is to sum every pair: 20,000 bodies means
