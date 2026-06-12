@@ -803,12 +803,12 @@ mod tests {
     use std::io::Write;
     use std::path::Path;
 
-    fn recorder_args_vec<'a>(extra: &'a [&'a str]) -> Vec<&'a str> {
+    fn recorder_args_vec_with_dir<'a>(extra: &'a [&'a str], frames_dir: &'a str) -> Vec<&'a str> {
         let mut args = vec![
             "nq",
             "--record",
             "--frames-dir",
-            ".sc/frame-test-frames",
+            frames_dir,
             "--width",
             "9",
             "--height",
@@ -820,10 +820,11 @@ mod tests {
         args
     }
 
-    fn recorder_args(extra: &[&str]) -> Args {
-        let args = recorder_args_vec(extra);
+    fn recorder_args_with_dir(extra: &[&str], frames_dir: &str) -> Args {
+        let args = recorder_args_vec_with_dir(extra, frames_dir);
         Args::parse_from(args)
     }
+
     fn write_executable(path: &Path, body: &str) {
         let mut file = fs::File::create(path).expect("create fake ffmpeg");
         file.write_all(body.as_bytes()).expect("write fake ffmpeg");
@@ -909,7 +910,11 @@ mod tests {
     }
     #[test]
     fn fixed_view_radius_overrides_autoscale_bounds() {
-        let recorder = FrameRecorder::new(&recorder_args(&[])).unwrap();
+        let recorder = FrameRecorder::new(&recorder_args_with_dir(
+            &[],
+            ".sc/frame-test-frames-fixed-view",
+        ))
+        .unwrap();
         assert_eq!(
             recorder.render_bounds((-100.0, 100.0, -50.0, 50.0)),
             (-2.0, 2.0, -2.0, 2.0)
@@ -917,8 +922,9 @@ mod tests {
     }
     #[test]
     fn multi_mode_frames_dir_writes_mode_subdirs_and_fixed_scale() {
-        let _ = fs::remove_dir_all(".sc/frame-test-frames");
-        let args = recorder_args(&["--color-by", "speed,accel,density"]);
+        let frames_dir = ".sc/frame-test-frames-multi-mode";
+        let _ = fs::remove_dir_all(frames_dir);
+        let args = recorder_args_with_dir(&["--color-by", "speed,accel,density"], frames_dir);
         let mut rec = FrameRecorder::new(&args).unwrap();
         let mut p = ParticleSoa::with_len(2);
         p.x = vec![-1.0, 1.0];
@@ -935,7 +941,7 @@ mod tests {
         assert_eq!(scales, rec.color_scale_receipts());
         for mode in ["speed", "accel", "density"] {
             assert_eq!(
-                fs::read_dir(format!(".sc/frame-test-frames/{mode}"))
+                fs::read_dir(format!("{frames_dir}/{mode}"))
                     .unwrap()
                     .count(),
                 2
@@ -949,14 +955,17 @@ mod tests {
 
     #[test]
     fn explicit_color_range_overrides_first_frame_scale() {
-        let args = Args::try_parse_from(recorder_args_vec(&[
-            "--color-by",
-            "speed",
-            "--color-min",
-            "2.0",
-            "--color-max",
-            "10.0",
-        ]))
+        let args = Args::try_parse_from(recorder_args_vec_with_dir(
+            &[
+                "--color-by",
+                "speed",
+                "--color-min",
+                "2.0",
+                "--color-max",
+                "10.0",
+            ],
+            ".sc/frame-test-frames-explicit-range",
+        ))
         .unwrap();
         let mut rec = FrameRecorder::new(&args).unwrap();
         let mut p = ParticleSoa::with_len(1);
@@ -977,14 +986,17 @@ mod tests {
 
     #[test]
     fn invalid_explicit_color_range_is_rejected() {
-        let args = Args::try_parse_from(recorder_args_vec(&[
-            "--color-by",
-            "speed",
-            "--color-min",
-            "10.0",
-            "--color-max",
-            "2.0",
-        ]))
+        let args = Args::try_parse_from(recorder_args_vec_with_dir(
+            &[
+                "--color-by",
+                "speed",
+                "--color-min",
+                "10.0",
+                "--color-max",
+                "2.0",
+            ],
+            ".sc/frame-test-frames-invalid-range",
+        ))
         .unwrap();
 
         let err = FrameRecorder::new(&args).unwrap_err();
@@ -994,19 +1006,23 @@ mod tests {
 
     #[test]
     fn viridis_colormap_reaches_high_stop_for_explicit_linear_max() {
-        let _ = fs::remove_dir_all(".sc/frame-test-frames");
-        let args = Args::try_parse_from(recorder_args_vec(&[
-            "--color-by",
-            "speed",
-            "--colormap",
-            "viridis",
-            "--color-scale",
-            "linear",
-            "--color-min",
-            "0.0",
-            "--color-max",
-            "1.0",
-        ]))
+        let frames_dir = ".sc/frame-test-frames-viridis";
+        let _ = fs::remove_dir_all(frames_dir);
+        let args = Args::try_parse_from(recorder_args_vec_with_dir(
+            &[
+                "--color-by",
+                "speed",
+                "--colormap",
+                "viridis",
+                "--color-scale",
+                "linear",
+                "--color-min",
+                "0.0",
+                "--color-max",
+                "1.0",
+            ],
+            frames_dir,
+        ))
         .unwrap();
         let mut rec = FrameRecorder::new(&args).unwrap();
         let mut p = ParticleSoa::with_len(1);
@@ -1019,7 +1035,7 @@ mod tests {
         rec.record_step(0, &p, (-1.0, 1.0, -1.0, 1.0), &[0.0], &[0.0])
             .unwrap();
 
-        let ppm = fs::read(".sc/frame-test-frames/frame_000000.ppm").unwrap();
+        let ppm = fs::read(format!("{frames_dir}/frame_000000.ppm")).unwrap();
         let header_len = b"P6\n9 9\n255\n".len();
         let center = header_len + ((4 * 9 + 4) * 3);
         assert_eq!(&ppm[center..center + 3], &[253, 231, 37]);
@@ -1027,19 +1043,23 @@ mod tests {
 
     #[test]
     fn golden_mode_ignores_color_mapping_controls() {
-        let _ = fs::remove_dir_all(".sc/frame-test-frames");
-        let args = Args::try_parse_from(recorder_args_vec(&[
-            "--color-by",
-            "golden",
-            "--colormap",
-            "viridis",
-            "--color-scale",
-            "linear",
-            "--color-min",
-            "0.0",
-            "--color-max",
-            "1.0",
-        ]))
+        let frames_dir = ".sc/frame-test-frames-golden";
+        let _ = fs::remove_dir_all(frames_dir);
+        let args = Args::try_parse_from(recorder_args_vec_with_dir(
+            &[
+                "--color-by",
+                "golden",
+                "--colormap",
+                "viridis",
+                "--color-scale",
+                "linear",
+                "--color-min",
+                "0.0",
+                "--color-max",
+                "1.0",
+            ],
+            frames_dir,
+        ))
         .unwrap();
         let mut rec = FrameRecorder::new(&args).unwrap();
         let mut p = ParticleSoa::with_len(1);
@@ -1052,7 +1072,7 @@ mod tests {
         rec.record_step(0, &p, (-1.0, 1.0, -1.0, 1.0), &[0.0], &[0.0])
             .unwrap();
 
-        let ppm = fs::read(".sc/frame-test-frames/frame_000000.ppm").unwrap();
+        let ppm = fs::read(format!("{frames_dir}/frame_000000.ppm")).unwrap();
         let header_len = b"P6\n9 9\n255\n".len();
         let center = header_len + ((4 * 9 + 4) * 3);
         assert_eq!(&ppm[center..center + 3], &[255, 200, 110]);
