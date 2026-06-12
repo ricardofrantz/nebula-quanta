@@ -24,24 +24,42 @@ Baseline for bead `nebula-quanta-83w` and future SIMD work.
 ## BH force threading fix check (nebula-quanta-y7f)
 
 - Date: 2026-06-11
-- Commands:
+- Commands (historical pre-`nebula-quanta-pf3` baseline):
   - `cargo bench --bench nbody -- bh_force`
   - `cargo run --release -- --mode barnes_hut --n {10000,50000} --steps 1 --dt 0.001 --theta 0.7 --epsilon 0.01 --init plummer --seed 42 --threads {1,4} --energy-sample-ratio 0.0`
-- Change note: Barnes-Hut force evaluation uses the scoped-thread path at and above 50,000 particles. Below that threshold, `--threads > 1` falls back to the same single-thread traversal and setup as `--threads 1`.
+- Current note: Barnes-Hut force evaluation now uses the strictly serial traversal only for `--threads 1`; every `--threads > 1` run uses the persistent rayon pool regardless of particle count.
 
 | Group | N | Threads | Median / force_ms |
 | --- | ---: | ---: | ---: |
 | bh_force criterion | 1,000 | 1 | 696.32 µs |
-| bh_force criterion | 1,000 | 4 (fallback) | 699.35 µs |
+| bh_force criterion | 1,000 | 4 (pre-pf3 serialized) | 699.35 µs |
 | bh_force criterion | 10,000 | 1 | 11.263 ms |
-| bh_force criterion | 10,000 | 4 (fallback) | 10.836 ms |
+| bh_force criterion | 10,000 | 4 (pre-pf3 serialized) | 10.836 ms |
 
 Criterion rows are from a single back-to-back run on an idle host; the
-fallback rows match `--threads 1` within run-to-run noise.
+pre-pf3 low-N `threads=4` rows matched `--threads 1` within run-to-run noise.
 | one-step run | 10,000 | 1 | 22.204 ms |
-| one-step run | 10,000 | 4 (fallback) | 22.399 ms |
+| one-step run | 10,000 | 4 (pre-pf3 serialized) | 22.399 ms |
 | one-step run | 50,000 | 1 | 132.612 ms |
-| one-step run | 50,000 | 4 (scoped threads) | 121.301 ms |
+| one-step run | 50,000 | 4 (pre-pf3 scoped threads) | 121.301 ms |
+
+## BH force persistent-pool scaling (nebula-quanta-pf3)
+
+- Date: 2026-06-12
+- Machine: AMD Ryzen 9 9900X 12-Core Processor; 18 CPUs visible (`lscpu`: 1 thread/core, 1 socket); idle host (1-min load < 2)
+- Command: `cargo bench --bench nbody 2>&1 | tee .sc/nebula-quanta-pf3.bench-idle.log`
+- Change note: `--threads 1` remains strictly serial; `--threads > 1` uses a cached rayon pool with work-stealing over safe `par_chunks_mut` disjoint output chunks (64 particles per chunk) and per-worker traversal stacks from `for_each_init`. The 50,000-particle single-thread fallback is removed.
+- Result: 12-thread vs 1-thread speedups of 2.37x at N=1k, 7.88x at N=10k, and 11.08x at N=100k. An earlier measurement taken while large unrelated jobs loaded the host (1-min load ~27) suggested a ~4.7x ceiling; that was load contamination, not a property of the code — idle scaling is near-linear at N>=10k.
+- Serial check: a same-conditions A/B at N=10k threads=1 measured 22.33 ms on the pre-change commit vs 21.28 ms with this change — no serial regression. These rows are not comparable to the pre-pf3 baseline rows above (different runs; see the cross-run comparability note).
+
+| Group | N | Threads | Median |
+| --- | ---: | ---: | ---: |
+| bh_force criterion | 1,000 | 1 | 1.0376 ms |
+| bh_force criterion | 1,000 | 12 | 438.60 µs |
+| bh_force criterion | 10,000 | 1 | 21.284 ms |
+| bh_force criterion | 10,000 | 12 | 2.7019 ms |
+| bh_force criterion | 100,000 | 1 | 267.30 ms |
+| bh_force criterion | 100,000 | 12 | 24.126 ms |
 
 ## Direct-force SIMD honesty decision (nebula-quanta-0nn)
 

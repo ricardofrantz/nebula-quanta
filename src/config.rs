@@ -102,6 +102,7 @@ pub struct Args {
     /// Fixed square view half-width centered on the origin; `0` auto-fits the particle extent per frame.
     #[arg(long, default_value_t = 0.0)]
     pub view_radius: f64,
+    /// Barnes-Hut force worker threads; `1` is strictly serial, values >1 use a persistent rayon pool.
     #[arg(long, default_value_t = 1)]
     pub threads: usize,
     #[arg(long)]

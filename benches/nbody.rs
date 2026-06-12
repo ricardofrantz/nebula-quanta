@@ -6,10 +6,7 @@ use nebula_quanta::{
         compute_direct_accel_with_g_unrolled,
     },
     particle::ParticleSoa,
-    sim::{
-        MIN_PARALLEL_BH_PARTICLES, build_tree, compute_accel_barnes_hut_with_threshold,
-        preflight_node_capacity,
-    },
+    sim::{build_tree, compute_accel_barnes_hut_with_threshold, preflight_node_capacity},
     tree::QuadTree,
 };
 
@@ -58,12 +55,12 @@ fn tree_build(c: &mut Criterion) {
 fn bh_force_eval(c: &mut Criterion) {
     let mut group = c.benchmark_group("bh_force");
     group.sample_size(10);
-    for n in [1_000usize, 10_000] {
+    for n in [1_000usize, 10_000, 100_000] {
         let particles = plummer_particles(n);
         let capacity = preflight_node_capacity(n).expect("node capacity");
         let mut tree = QuadTree::with_capacity(capacity);
         build_tree(&mut tree, &particles).unwrap();
-        for threads in [1usize, 4] {
+        for threads in [1usize, 12] {
             group.bench_with_input(
                 BenchmarkId::new(format!("threads={threads}"), n),
                 &(n, threads),
@@ -71,14 +68,7 @@ fn bh_force_eval(c: &mut Criterion) {
                     let mut ax = vec![0.0; n];
                     let mut ay = vec![0.0; n];
                     let mut stack = Vec::with_capacity(capacity);
-                    let mut thread_stacks: Vec<Vec<usize>> =
-                        if *threads > 1 && n >= MIN_PARALLEL_BH_PARTICLES {
-                            (0..*threads)
-                                .map(|_| Vec::with_capacity(capacity))
-                                .collect()
-                        } else {
-                            Vec::new()
-                        };
+                    let mut thread_stacks: Vec<Vec<usize>> = Vec::new();
                     b.iter(|| {
                         compute_accel_barnes_hut_with_threshold(
                             black_box(&particles),
@@ -87,7 +77,7 @@ fn bh_force_eval(c: &mut Criterion) {
                             black_box(EPSILON),
                             black_box(G),
                             black_box(*threads),
-                            black_box(MIN_PARALLEL_BH_PARTICLES),
+                            black_box(1),
                             black_box(&mut stack),
                             black_box(&mut thread_stacks),
                             black_box(&mut ax),

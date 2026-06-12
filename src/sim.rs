@@ -1,5 +1,9 @@
+use std::collections::HashMap;
 use std::mem::size_of;
+use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
+
+use rayon::prelude::*;
 
 use crate::{
     config::Args,
@@ -10,26 +14,21 @@ use crate::{
     tree::{Node, QuadTree},
 };
 
-// 2026-06-11 measurements on the benchmark host support this crossover: a
-// one-step N=10,000 run stayed on the fallback and measured force_ms=22.204 for
-// threads=1 vs 22.399 for threads=4, while N=50,000 exercised the scoped-thread
-// path and measured force_ms=132.612 for threads=1 vs 121.301 for threads=4.
-// Production keeps --threads>1 on the single-thread traversal below 50,000
-// particles and uses the real scoped-thread implementation at/above this point,
-// where per-call spawn cost was amortized on this host.
-pub const MIN_PARALLEL_BH_PARTICLES: usize = 50_000;
+// Historical compatibility constant for tests/benchmarks that pass a threshold
+// into helper functions. Barnes-Hut force evaluation no longer has a small-N
+// serialization path: every `--threads > 1` run uses the persistent rayon pool,
+// while `--threads 1` remains strictly serial.
+pub const MIN_PARALLEL_BH_PARTICLES: usize = 1;
+
+const PARTICLE_CHUNK_LEN: usize = 64;
+const TRAVERSAL_STACK_CAPACITY: usize = 4_096;
 
 fn effective_bh_force_threads(
     requested_threads: usize,
     particle_count: usize,
-    min_parallel_particles: usize,
+    _min_parallel_particles: usize,
 ) -> usize {
-    let requested_threads = requested_threads.max(1).min(particle_count.max(1));
-    if particle_count < min_parallel_particles {
-        1
-    } else {
-        requested_threads
-    }
+    requested_threads.max(1).min(particle_count.max(1))
 }
 
 pub fn compute_barnes_hut_accel_snapshot(
@@ -63,17 +62,10 @@ fn compute_barnes_hut_accel_snapshot_with_threshold(
     let mut ax = vec![0.0; n];
     let mut ay = vec![0.0; n];
     let mut stack = Vec::with_capacity(node_capacity);
-    let mut traversal_stacks: Vec<Vec<usize>> = if active_threads > 1 {
-        (0..active_threads)
-            .map(|_| Vec::with_capacity(node_capacity))
-            .collect()
-    } else {
-        Vec::new()
-    };
     build_tree(&mut tree, particles)?;
     let effective_theta = args.theta_for_step(0, n, tree.root_bounds());
     let epsilon = args.epsilon_for_step(0, n, tree.root_bounds());
-    compute_accel_barnes_hut_with_threshold(
+    compute_accel_barnes_hut_with_threshold_impl(
         particles,
         &tree,
         effective_theta,
@@ -82,7 +74,6 @@ fn compute_barnes_hut_accel_snapshot_with_threshold(
         active_threads,
         min_parallel_particles,
         &mut stack,
-        &mut traversal_stacks,
         &mut ax,
         &mut ay,
     )?;
@@ -125,13 +116,6 @@ fn run_barnes_hut_with_threshold(
     let mut ax = vec![0.0; n];
     let mut ay = vec![0.0; n];
     let mut traversal = Vec::with_capacity(node_capacity);
-    let mut traversal_stacks: Vec<Vec<usize>> = if active_threads > 1 {
-        (0..active_threads)
-            .map(|_| Vec::with_capacity(node_capacity))
-            .collect()
-    } else {
-        Vec::new()
-    };
     let mut recorder = recorder;
     let mut rk2_particles = particles.clone();
     let mut rk2_ax = vec![0.0; n];
@@ -155,7 +139,7 @@ fn run_barnes_hut_with_threshold(
     }
 
     step_start = Instant::now();
-    compute_accel_barnes_hut_with_threshold(
+    compute_accel_barnes_hut_with_threshold_impl(
         particles,
         &tree,
         theta,
@@ -164,7 +148,6 @@ fn run_barnes_hut_with_threshold(
         active_threads,
         min_parallel_particles,
         &mut traversal,
-        &mut traversal_stacks,
         &mut ax,
         &mut ay,
     )?;
@@ -197,7 +180,6 @@ fn run_barnes_hut_with_threshold(
                     &mut rk2_ax,
                     &mut rk2_ay,
                     &mut traversal,
-                    &mut traversal_stacks,
                     min_parallel_particles,
                 )?;
             }
@@ -217,7 +199,7 @@ fn run_barnes_hut_with_threshold(
         }
 
         t = Instant::now();
-        compute_accel_barnes_hut_with_threshold(
+        compute_accel_barnes_hut_with_threshold_impl(
             particles,
             &tree,
             theta,
@@ -226,7 +208,6 @@ fn run_barnes_hut_with_threshold(
             active_threads,
             min_parallel_particles,
             &mut traversal,
-            &mut traversal_stacks,
             &mut ax,
             &mut ay,
         )?;
@@ -274,7 +255,6 @@ fn integrate_rk2_step(
     mid_ax: &mut [f64],
     mid_ay: &mut [f64],
     traversal: &mut Vec<usize>,
-    traversal_stacks: &mut Vec<Vec<usize>>,
     min_parallel_particles: usize,
 ) -> Result<(), String> {
     let n = particles.len();
@@ -289,7 +269,7 @@ fn integrate_rk2_step(
 
     build_tree(tree, mid_particles)?;
 
-    compute_accel_barnes_hut_with_threshold(
+    compute_accel_barnes_hut_with_threshold_impl(
         mid_particles,
         tree,
         theta,
@@ -298,7 +278,6 @@ fn integrate_rk2_step(
         thread_count,
         min_parallel_particles,
         traversal,
-        traversal_stacks,
         mid_ax,
         mid_ay,
     )?;
@@ -517,11 +496,11 @@ pub fn compute_accel_barnes_hut(
     g: f64,
     thread_count: usize,
     stack: &mut Vec<usize>,
-    thread_stacks: &mut Vec<Vec<usize>>,
+    _parallel_workspace: &mut Vec<Vec<usize>>,
     ax: &mut [f64],
     ay: &mut [f64],
 ) -> Result<(), String> {
-    compute_accel_barnes_hut_with_threshold(
+    compute_accel_barnes_hut_with_threshold_impl(
         particles,
         tree,
         theta,
@@ -530,7 +509,6 @@ pub fn compute_accel_barnes_hut(
         thread_count,
         MIN_PARALLEL_BH_PARTICLES,
         stack,
-        thread_stacks,
         ax,
         ay,
     )
@@ -546,13 +524,47 @@ pub fn compute_accel_barnes_hut_with_threshold(
     thread_count: usize,
     min_parallel_particles: usize,
     stack: &mut Vec<usize>,
-    thread_stacks: &mut Vec<Vec<usize>>,
+    _parallel_workspace: &mut Vec<Vec<usize>>,
+    ax: &mut [f64],
+    ay: &mut [f64],
+) -> Result<(), String> {
+    compute_accel_barnes_hut_with_threshold_impl(
+        particles,
+        tree,
+        theta,
+        epsilon,
+        g,
+        thread_count,
+        min_parallel_particles,
+        stack,
+        ax,
+        ay,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compute_accel_barnes_hut_with_threshold_impl(
+    particles: &ParticleSoa,
+    tree: &QuadTree,
+    theta: f64,
+    epsilon: f64,
+    g: f64,
+    thread_count: usize,
+    min_parallel_particles: usize,
+    stack: &mut Vec<usize>,
     ax: &mut [f64],
     ay: &mut [f64],
 ) -> Result<(), String> {
     let n = particles.len();
     if n == 0 {
         return Ok(());
+    }
+    if ax.len() < n || ay.len() < n {
+        return Err(format!(
+            "acceleration buffer too short: n={n}, ax_len={}, ay_len={}",
+            ax.len(),
+            ay.len()
+        ));
     }
     let thread_count = effective_bh_force_threads(thread_count, n, min_parallel_particles);
 
@@ -577,7 +589,6 @@ pub fn compute_accel_barnes_hut_with_threshold(
         g,
         thread_count,
         stack,
-        thread_stacks,
         ax,
         ay,
     )?;
@@ -656,7 +667,6 @@ fn compute_accel_barnes_hut_parallel(
     g: f64,
     thread_count: usize,
     stack: &mut Vec<usize>,
-    thread_stacks: &mut Vec<Vec<usize>>,
     ax: &mut [f64],
     ay: &mut [f64],
 ) -> Result<(), String> {
@@ -665,6 +675,14 @@ fn compute_accel_barnes_hut_parallel(
     }
 
     let n = particles.len();
+    if ax.len() < n || ay.len() < n {
+        return Err(format!(
+            "acceleration buffer too short: n={n}, ax_len={}, ay_len={}",
+            ax.len(),
+            ay.len()
+        ));
+    }
+
     let active_threads = thread_count.min(n);
     if active_threads <= 1 {
         for i in 0..n {
@@ -676,75 +694,60 @@ fn compute_accel_barnes_hut_parallel(
         return Ok(());
     }
 
-    let stack_capacity = stack.capacity().max(1);
-    if thread_stacks.len() < active_threads {
-        thread_stacks.extend(
-            (thread_stacks.len()..active_threads).map(|_| Vec::with_capacity(stack_capacity)),
-        );
-    }
-    for thread_stack in thread_stacks.iter_mut().take(active_threads) {
-        if thread_stack.capacity() < stack_capacity {
-            thread_stack.reserve(stack_capacity - thread_stack.capacity());
-        }
-    }
+    let _ = stack;
 
-    let chunk_base = n / active_threads;
-    let chunk_extra = n % active_threads;
-    let chunk_lengths: Vec<usize> = (0..active_threads)
-        .map(|thread_id| chunk_base + usize::from(thread_id < chunk_extra))
-        .collect();
-
-    let thread_result: Result<(), String> = std::thread::scope(|scope| {
-        let mut stack_handles = Vec::with_capacity(active_threads);
-        let mut chunk_start = 0usize;
-        let mut ax_rest = ax;
-        let mut ay_rest = ay;
-        for ((local_stack, &chunk_len), thread_id) in thread_stacks
-            .iter_mut()
-            .take(active_threads)
-            .zip(chunk_lengths.iter())
-            .zip(0..)
-        {
-            local_stack.clear();
-            let (chunk_ax, next_ax) = ax_rest.split_at_mut(chunk_len);
-            let (chunk_ay, next_ay) = ay_rest.split_at_mut(chunk_len);
-            ax_rest = next_ax;
-            ay_rest = next_ay;
-            let start = chunk_start;
-            chunk_start += chunk_len;
-
-            let handle = scope.spawn(move || {
-                for (offset, (ax_slot, ay_slot)) in
-                    chunk_ax.iter_mut().zip(chunk_ay.iter_mut()).enumerate()
-                {
-                    let particle_idx = start + offset;
-                    let (force_x, force_y) = compute_particle_force(
-                        particle_idx,
-                        particles,
-                        nodes,
-                        theta2,
-                        eps2,
-                        g,
-                        local_stack,
-                    );
-                    *ax_slot = force_x;
-                    *ay_slot = force_y;
-                }
-                Ok::<(), String>(())
-            });
-            stack_handles.push((thread_id, handle));
-        }
-        for (_thread_id, handle) in stack_handles {
-            handle
-                .join()
-                .map_err(|_| "threaded Barnes-Hut force worker panicked".to_string())??;
-        }
-        Ok(())
+    let ax = &mut ax[..n];
+    let ay = &mut ay[..n];
+    let pool = rayon_pool(active_threads)?;
+    pool.install(|| {
+        ax.par_chunks_mut(PARTICLE_CHUNK_LEN)
+            .zip(ay.par_chunks_mut(PARTICLE_CHUNK_LEN))
+            .enumerate()
+            .for_each_init(
+                || Vec::with_capacity(TRAVERSAL_STACK_CAPACITY),
+                |local_stack, (chunk_idx, (chunk_ax, chunk_ay))| {
+                    let start = chunk_idx * PARTICLE_CHUNK_LEN;
+                    for (offset, (ax_slot, ay_slot)) in
+                        chunk_ax.iter_mut().zip(chunk_ay.iter_mut()).enumerate()
+                    {
+                        let particle_idx = start + offset;
+                        let (force_x, force_y) = compute_particle_force(
+                            particle_idx,
+                            particles,
+                            nodes,
+                            theta2,
+                            eps2,
+                            g,
+                            local_stack,
+                        );
+                        *ax_slot = force_x;
+                        *ay_slot = force_y;
+                    }
+                },
+            );
     });
 
-    thread_result?;
-
     Ok(())
+}
+
+fn rayon_pool(thread_count: usize) -> Result<&'static rayon::ThreadPool, String> {
+    static POOLS: OnceLock<Mutex<HashMap<usize, &'static rayon::ThreadPool>>> = OnceLock::new();
+    let pools = POOLS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut pools = pools
+        .lock()
+        .map_err(|_| "rayon thread-pool cache lock poisoned".to_string())?;
+    if let Some(pool) = pools.get(&thread_count) {
+        return Ok(*pool);
+    }
+
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(thread_count)
+        .thread_name(move |idx| format!("nq-bh-{thread_count}-{idx}"))
+        .build()
+        .map_err(|err| format!("failed to build rayon thread pool: {err}"))?;
+    let pool = Box::leak(Box::new(pool));
+    pools.insert(thread_count, pool);
+    Ok(pool)
 }
 
 const F64_BYTES: usize = size_of::<f64>();
@@ -784,11 +787,15 @@ fn node_pool_bytes(nodes: usize) -> usize {
     nodes.saturating_mul(NODE_BYTES)
 }
 
-fn traversal_stack_bytes(slots: usize, thread_count: usize) -> usize {
-    let active_threads = thread_count.max(1);
-    slots
-        .saturating_mul(active_threads)
-        .saturating_mul(USIZE_BYTES)
+fn traversal_stack_bytes(node_capacity: usize, thread_count: usize) -> usize {
+    // The base serial stack is allocated unconditionally before the force
+    // call; threaded runs add the rayon workers' fixed-capacity stacks.
+    let stack_slots = if thread_count <= 1 {
+        node_capacity
+    } else {
+        node_capacity.saturating_add(thread_count.saturating_mul(TRAVERSAL_STACK_CAPACITY))
+    };
+    stack_slots.saturating_mul(USIZE_BYTES)
 }
 
 #[cfg(test)]
@@ -1457,14 +1464,14 @@ mod tests {
         run_barnes_hut(&mut single_final, &args_single, None)?;
 
         // The threaded path partitions particle indices into disjoint contiguous
-        // chunks. Each worker calls the same per-particle traversal and writes
-        // only its own ax/ay slots, so no reduction or accumulation order changes.
+        // rayon chunks. Each worker calls the same per-particle traversal and
+        // writes only its own ax/ay slots, so no reduction or accumulation order changes.
         for threads in [2usize, 3, 4] {
             let args_threaded = thread_parity_args(threads);
             assert_ne!(
                 args_threaded.n % threads,
                 0,
-                "N=4097 should exercise remainder chunk distribution for threads={threads}"
+                "N=4097 should exercise non-even threaded work distribution for threads={threads}"
             );
 
             let (threaded_ax, threaded_ay) = compute_barnes_hut_accel_snapshot_with_threshold(
@@ -1626,6 +1633,104 @@ mod tests {
     }
 
     #[test]
+    fn parallel_bh_force_rejects_short_buffers_and_ignores_oversized_tail() -> Result<(), String> {
+        let n = 129usize;
+        let args = Args::parse_from([
+            "nq",
+            "--n",
+            "129",
+            "--steps",
+            "0",
+            "--theta",
+            "0.5",
+            "--epsilon",
+            "0.01",
+            "--g",
+            "0.9",
+            "--threads",
+            "2",
+            "--seed",
+            "2026",
+        ]);
+        let particles = ParticleSoa::random_with_profiles(
+            n,
+            args.seed,
+            args.init,
+            args.init_radius,
+            args.init_spread,
+            args.init_v_amp,
+            args.init_lambda,
+            args.init_center_x,
+            args.init_center_y,
+            args.mass_profile,
+            args.mass_mean,
+            args.mass_stddev,
+            args.mass_min,
+            args.mass_max,
+            args.mass_alpha,
+        );
+        let mut tree = QuadTree::with_capacity(preflight_node_capacity(n)?);
+        build_tree(&mut tree, &particles)?;
+        let mut stack = Vec::with_capacity(preflight_node_capacity(n)?);
+        let mut parallel_workspace = Vec::new();
+
+        let mut short_ax = vec![0.0; n - 1];
+        let mut short_ay = vec![0.0; n];
+        let err = compute_accel_barnes_hut(
+            &particles,
+            &tree,
+            args.theta,
+            args.epsilon,
+            args.g,
+            2,
+            &mut stack,
+            &mut parallel_workspace,
+            &mut short_ax,
+            &mut short_ay,
+        )
+        .expect_err("short acceleration buffer should return Err");
+        assert!(
+            err.contains("acceleration buffer too short"),
+            "unexpected error for short buffer: {err}"
+        );
+
+        let mut oversized_ax = vec![f64::NAN; n + 7];
+        let mut oversized_ay = vec![f64::NAN; n + 7];
+        compute_accel_barnes_hut(
+            &particles,
+            &tree,
+            args.theta,
+            args.epsilon,
+            args.g,
+            2,
+            &mut stack,
+            &mut parallel_workspace,
+            &mut oversized_ax,
+            &mut oversized_ay,
+        )?;
+
+        assert!(oversized_ax[..n].iter().all(|v| v.is_finite()));
+        assert!(oversized_ay[..n].iter().all(|v| v.is_finite()));
+        assert!(oversized_ax[n..].iter().all(|v| v.is_nan()));
+        assert!(oversized_ay[n..].iter().all(|v| v.is_nan()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn traversal_stack_accounting_matches_allocated_stack_strategy() {
+        let node_capacity = 100_001usize;
+        assert_eq!(
+            super::traversal_stack_bytes(node_capacity, 1),
+            node_capacity * std::mem::size_of::<usize>()
+        );
+        assert_eq!(
+            super::traversal_stack_bytes(node_capacity, 12),
+            (node_capacity + 12 * super::TRAVERSAL_STACK_CAPACITY) * std::mem::size_of::<usize>()
+        );
+    }
+
+    #[test]
     fn bh_force_matches_direct_for_small_theta_single_thread() -> Result<(), String> {
         let n = 128usize;
         let args = Args::parse_from([
@@ -1670,7 +1775,7 @@ mod tests {
         let mut bh_ax = vec![0.0; n];
         let mut bh_ay = vec![0.0; n];
         let mut stack = Vec::with_capacity(preflight_node_capacity(n)?);
-        let mut stacks = vec![Vec::with_capacity(preflight_node_capacity(n)?); 1];
+        let mut parallel_workspace = Vec::new();
         compute_accel_barnes_hut(
             &particles,
             &tree,
@@ -1679,7 +1784,7 @@ mod tests {
             args.g,
             1,
             &mut stack,
-            &mut stacks,
+            &mut parallel_workspace,
             &mut bh_ax,
             &mut bh_ay,
         )?;
