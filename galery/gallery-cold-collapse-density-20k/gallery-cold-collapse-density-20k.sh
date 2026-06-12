@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$#" -ne 0 ]]; then
+  echo "usage: ./gallery-cold-collapse-density-20k.sh" >&2
+  echo "all render settings are fixed inside this script; no arguments are accepted" >&2
+  exit 2
+fi
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "${script_dir}/../.." && pwd)"
+name="gallery-cold-collapse-density-20k"
+tmp_dir="${script_dir}/.tmp-${name}"
+tmp_mp4="${tmp_dir}/${name}.mp4"
+out_mp4="${script_dir}/${name}.mp4"
+
+n=20000
+steps=420
+dt=0.00018
+theta=0.7
+epsilon=0.005
+init=plummer
+init_radius=1.0
+init_v_amp=20
+init_lambda=1.0
+mass_profile=lognormal
+mass_mean=1.0
+mass_stddev=0.5
+mass_min=0.2
+mass_max=5.0
+seed=1902
+integrator=leapfrog
+view_radius=3.0
+threads=12
+width=960
+height=540
+fps=30
+every_steps=4
+color_by=density
+colormap=magma
+color_scale=asinh
+color_auto=first-p99
+color_headroom=1.2
+
+cleanup() {
+  rm -rf "${tmp_dir}"
+}
+trap cleanup EXIT
+
+cd "${repo_root}"
+cargo build --release
+
+rm -rf "${tmp_dir}"
+mkdir -p "${tmp_dir}"
+
+target/release/nq \
+  --n "${n}" \
+  --steps "${steps}" \
+  --dt "${dt}" \
+  --theta "${theta}" \
+  --epsilon "${epsilon}" \
+  --init "${init}" \
+  --init-radius "${init_radius}" \
+  --init-v-amp "${init_v_amp}" \
+  --init-lambda "${init_lambda}" \
+  --mass-profile "${mass_profile}" \
+  --mass-mean "${mass_mean}" \
+  --mass-stddev "${mass_stddev}" \
+  --mass-min "${mass_min}" \
+  --mass-max "${mass_max}" \
+  --seed "${seed}" \
+  --integrator "${integrator}" \
+  --view-radius "${view_radius}" \
+  --threads "${threads}" \
+  --energy-drift off \
+  --width "${width}" \
+  --height "${height}" \
+  --record \
+  --output "${tmp_mp4}" \
+  --fps "${fps}" \
+  --every-steps "${every_steps}" \
+  --color-by "${color_by}" \
+  --colormap "${colormap}" \
+  --color-scale "${color_scale}" \
+  --color-auto "${color_auto}" \
+  --color-headroom "${color_headroom}"
+
+mv "${tmp_mp4}" "${out_mp4}"

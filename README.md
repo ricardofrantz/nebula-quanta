@@ -56,12 +56,17 @@ regenerates it and the `.md` receipt that explains the render.
 | --- | --- | ---: | --- | --- | ---: | ---: | --- |
 | 1M-body disk instability / clump formation (v2) | [MP4](./galery/gallery-galaxy-disk-1m-v2/gallery-galaxy-disk-1m-v2.mp4) | 1,000,000 | f64 | 1920x1080 | 51 | 15m18.548s | rev-2 unchanged |
 | Two-galaxy merger (v3) | [MP4](./galery/gallery-merger-1m-v3/gallery-merger-1m-v3.mp4) | 1,000,000 | f64 | 1920x1080 | 201 | 35m14.060s | H.264 CRF 28 |
+| Cold Plummer collapse, density-colored | [MP4](./galery/gallery-cold-collapse-density-20k/gallery-cold-collapse-density-20k.mp4) | 20,000 | f64 | 960x540 | 106 | 15.68s | density/magma |
+| Rotating disk shear fragmentation, speed-colored | [MP4](./galery/gallery-shear-fragmentation-speed-35k/gallery-shear-fragmentation-speed-35k.mp4) | 35,000 | f64 | 960x540 | 91 | 20.00s | speed/turbo |
+| Plummer heavy mass spectrum | [MP4](./galery/gallery-mass-spectrum-plummer-25k/gallery-mass-spectrum-plummer-25k.mp4) | 25,000 | f64 | 960x540 | 91 | 8.80s | mass/plasma |
+| Retrograde unequal-mass merger, acceleration-colored | [MP4](./galery/gallery-retrograde-merger-accel-50k/gallery-retrograde-merger-accel-50k.mp4) | 50,000 | f64 | 960x540 | 96 | 41.36s | accel/inferno |
 | Fast Plummer gallery test | [MP4](./galery/gallery-test-plummer-2k/gallery-test-plummer-2k.mp4) | 2,000 | f64 | 640x360 | 21 | quick | test case |
 
-Both gallery clips keep the total simulated mass near the validated 20k-body
-recipes by scaling the 1M-body particle masses to mean 0.02. The disk clip
-shows disk instability and clump formation rather than stable spiral arms. The
-MP4s are the plain forward renders.
+The large 1M showcase clips keep the total simulated mass near the validated
+20k-body recipes by scaling the particle masses to mean 0.02. The smaller
+color-study clips use the render controls to expose density, speed,
+acceleration, and mass structure from different initial conditions. They are
+plain forward renders, not looped or crossfaded previews.
 
 ### 1M-body disk instability v2 command
 
