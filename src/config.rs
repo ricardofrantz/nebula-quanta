@@ -33,6 +33,21 @@ pub struct Args {
     /// Initial-condition profile.
     #[arg(long, default_value = "uniform", value_enum)]
     pub init: InitProfile,
+    /// Secondary/primary mass ratio for merger initial conditions (clamped to (0, 1]).
+    #[arg(long, default_value_t = 1.0)]
+    pub merger_mass_ratio: f64,
+    /// Initial merger separation along x; defaults to 3 * init-radius when <= 0.
+    #[arg(long, default_value_t = 0.0)]
+    pub merger_separation: f64,
+    /// Initial merger perpendicular y offset; defaults to 0.5 * init-radius when < 0.
+    #[arg(long, default_value_t = -1.0)]
+    pub merger_impact_parameter: f64,
+    /// Initial merger closing speed along x; defaults to near-parabolic when <= 0.
+    #[arg(long, default_value_t = 0.0)]
+    pub merger_v_rel: f64,
+    /// Secondary disk spin sense for merger initial conditions.
+    #[arg(long, default_value = "prograde", value_enum)]
+    pub merger_spin: MergerSpin,
     /// Initial radial extent for uniform, plummer, and disk profiles.
     #[arg(long, default_value_t = 1.0)]
     pub init_radius: f64,
@@ -183,6 +198,13 @@ pub enum InitProfile {
     KeplerianDisk,
     #[value(name = "galaxy-disk")]
     GalaxyDisk,
+    Merger,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MergerSpin {
+    Prograde,
+    Retrograde,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
@@ -369,6 +391,32 @@ mod tests {
         assert!((args.disk_scale_length - 0.4).abs() < f64::EPSILON);
         assert!((args.disk_central_mass_frac - 0.2).abs() < f64::EPSILON);
         assert!((args.disk_dispersion - 0.03).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn parse_merger_options() {
+        let args = Args::parse_from([
+            "nq",
+            "--init",
+            "merger",
+            "--merger-mass-ratio",
+            "0.7",
+            "--merger-separation",
+            "3.5",
+            "--merger-impact-parameter",
+            "0.4",
+            "--merger-v-rel",
+            "1.2",
+            "--merger-spin",
+            "retrograde",
+        ]);
+
+        assert_eq!(args.init, InitProfile::Merger);
+        assert_eq!(args.merger_spin, MergerSpin::Retrograde);
+        assert!((args.merger_mass_ratio - 0.7).abs() < f64::EPSILON);
+        assert!((args.merger_separation - 3.5).abs() < f64::EPSILON);
+        assert!((args.merger_impact_parameter - 0.4).abs() < f64::EPSILON);
+        assert!((args.merger_v_rel - 1.2).abs() < f64::EPSILON);
     }
 
     #[test]

@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `--init merger`: two-galaxy collision initial condition composing two `galaxy-disk` realizations in the center-of-mass frame — `--merger-mass-ratio` (secondary scaled by `sqrt(q)` in size, masses rescaled exactly to `q`), `--merger-separation`, `--merger-impact-parameter`, `--merger-v-rel` (default near-parabolic `sqrt(2GM/d)`), and `--merger-spin prograde|retrograde`. Bulk momenta cancel to f64 roundoff; each sub-galaxy passes the same rotation-curve checks as a standalone disk.
 - `--init galaxy-disk`: exponential surface-density disk with a central point mass (`--disk-central-mass-frac`), circular speeds computed from the actual enclosed discrete mass `v_c(r)=sqrt(G*M(<r)/r)`, and a Gaussian velocity-dispersion knob (`--disk-dispersion`, a simple fraction of local `v_c` — not a Toomre-Q analysis). `--disk-scale-length` sets the exponential scale length; rotation-curve and bitwise-determinism tests included.
 - `--record --output <file.mp4>` streams raw RGB frames straight into an ffmpeg child process — no PPM intermediates on disk (a long high-resolution render previously needed tens of GB of temporary frames). The `--frames-dir` PPM path remains as a fallback; the two flags are mutually exclusive. Missing ffmpeg or a failed encode surface as clean errors.
 - Criterion benchmark suite (`cargo bench`) for tree build, Barnes-Hut force, and direct force, with a recorded baseline in `BENCHMARKS.md`; the crate now also exposes a library target.

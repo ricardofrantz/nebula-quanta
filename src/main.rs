@@ -4,7 +4,8 @@ use nebula_quanta::{
     direct::{compute_direct_accel_with_g, run_direct},
     frame::FrameRecorder,
     particle::{
-        EnergySnapshot, ParticleSoa, compute_energy_snapshot, particle_bounds, total_momentum,
+        EnergySnapshot, InitParams, ParticleSoa, compute_energy_snapshot, particle_bounds,
+        total_momentum,
     },
     sim,
 };
@@ -26,27 +27,32 @@ fn main() {
         return;
     }
 
-    let mut particles = ParticleSoa::random_with_profiles_and_galaxy_disk(
-        args.n,
-        args.seed,
-        args.init,
-        args.init_radius,
-        args.init_spread,
-        args.init_v_amp,
-        args.init_lambda,
-        args.init_center_x,
-        args.init_center_y,
-        args.mass_profile,
-        args.mass_mean,
-        args.mass_stddev,
-        args.mass_min,
-        args.mass_max,
-        args.mass_alpha,
-        args.disk_scale_length,
-        args.disk_central_mass_frac,
-        args.disk_dispersion,
-        args.g,
-    );
+    let mut particles = ParticleSoa::from_init_params(InitParams {
+        n: args.n,
+        seed: args.seed,
+        init_profile: args.init,
+        init_radius: args.init_radius,
+        init_spread: args.init_spread,
+        init_v_amp: args.init_v_amp,
+        init_lambda: args.init_lambda,
+        init_center_x: args.init_center_x,
+        init_center_y: args.init_center_y,
+        mass_profile: args.mass_profile,
+        mass_mean: args.mass_mean,
+        mass_stddev: args.mass_stddev,
+        mass_min: args.mass_min,
+        mass_max: args.mass_max,
+        mass_alpha: args.mass_alpha,
+        disk_scale_length: args.disk_scale_length,
+        disk_central_mass_frac: args.disk_central_mass_frac,
+        disk_dispersion: args.disk_dispersion,
+        g: args.g,
+        merger_mass_ratio: args.merger_mass_ratio,
+        merger_separation: args.merger_separation,
+        merger_impact_parameter: args.merger_impact_parameter,
+        merger_v_rel: args.merger_v_rel,
+        merger_spin: args.merger_spin,
+    });
     let initial_epsilon =
         args.epsilon_for_step(0, particles.len(), particle_bounds(&particles).ok());
     let initial_energy = if args.should_measure_energy_snapshot() {

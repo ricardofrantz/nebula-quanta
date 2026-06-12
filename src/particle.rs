@@ -3,7 +3,7 @@ use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use std::f64::consts::PI;
 
-use crate::config::{InitProfile, MassProfile};
+use crate::config::{InitProfile, MassProfile, MergerSpin};
 
 #[derive(Clone, Debug)]
 pub struct ParticleSoa {
@@ -12,6 +12,34 @@ pub struct ParticleSoa {
     pub vx: Vec<f64>,
     pub vy: Vec<f64>,
     pub m: Vec<f64>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct InitParams {
+    pub n: usize,
+    pub seed: u64,
+    pub init_profile: InitProfile,
+    pub init_radius: f64,
+    pub init_spread: f64,
+    pub init_v_amp: f64,
+    pub init_lambda: f64,
+    pub init_center_x: f64,
+    pub init_center_y: f64,
+    pub mass_profile: MassProfile,
+    pub mass_mean: f64,
+    pub mass_stddev: f64,
+    pub mass_min: f64,
+    pub mass_max: f64,
+    pub mass_alpha: f64,
+    pub disk_scale_length: f64,
+    pub disk_central_mass_frac: f64,
+    pub disk_dispersion: f64,
+    pub g: f64,
+    pub merger_mass_ratio: f64,
+    pub merger_separation: f64,
+    pub merger_impact_parameter: f64,
+    pub merger_v_rel: f64,
+    pub merger_spin: MergerSpin,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -70,7 +98,7 @@ impl ParticleSoa {
         mass_max: f64,
         mass_alpha: f64,
     ) -> Self {
-        Self::random_with_profiles_and_galaxy_disk(
+        Self::from_init_params(InitParams {
             n,
             seed,
             init_profile,
@@ -86,88 +114,59 @@ impl ParticleSoa {
             mass_min,
             mass_max,
             mass_alpha,
-            0.0,
-            0.1,
-            0.05,
-            1.0,
-        )
+            disk_scale_length: 0.0,
+            disk_central_mass_frac: 0.1,
+            disk_dispersion: 0.05,
+            g: 1.0,
+            merger_mass_ratio: 1.0,
+            merger_separation: 0.0,
+            merger_impact_parameter: -1.0,
+            merger_v_rel: 0.0,
+            merger_spin: MergerSpin::Prograde,
+        })
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn random_with_profiles_and_galaxy_disk(
-        n: usize,
-        seed: u64,
-        init_profile: InitProfile,
-        init_radius: f64,
-        init_spread: f64,
-        init_v_amp: f64,
-        init_lambda: f64,
-        init_center_x: f64,
-        init_center_y: f64,
-        mass_profile: MassProfile,
-        mass_mean: f64,
-        mass_stddev: f64,
-        mass_min: f64,
-        mass_max: f64,
-        mass_alpha: f64,
-        disk_scale_length: f64,
-        disk_central_mass_frac: f64,
-        disk_dispersion: f64,
-        g: f64,
-    ) -> Self {
-        if init_profile == InitProfile::GalaxyDisk {
-            return sample_galaxy_disk(
-                n,
-                seed,
-                init_radius,
-                init_center_x,
-                init_center_y,
-                mass_profile,
-                mass_mean,
-                mass_stddev,
-                mass_min,
-                mass_max,
-                mass_alpha,
-                disk_scale_length,
-                disk_central_mass_frac,
-                disk_dispersion,
-                g,
-            );
+    pub fn from_init_params(params: InitParams) -> Self {
+        if params.init_profile == InitProfile::GalaxyDisk {
+            return sample_galaxy_disk_from_params(params);
+        }
+        if params.init_profile == InitProfile::Merger {
+            return sample_merger(params);
         }
 
-        let mut particles = Self::with_len(n);
-        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let mut particles = Self::with_len(params.n);
+        let mut rng = ChaCha8Rng::seed_from_u64(params.seed);
 
-        for i in 0..n {
+        for i in 0..params.n {
             let (x, y) = sample_initial_position(
                 &mut rng,
-                init_profile,
-                init_radius,
-                init_spread,
-                init_lambda,
-                init_center_x,
-                init_center_y,
+                params.init_profile,
+                params.init_radius,
+                params.init_spread,
+                params.init_lambda,
+                params.init_center_x,
+                params.init_center_y,
             );
             let (vx, vy) = sample_initial_velocity(
                 &mut rng,
-                init_profile,
-                init_v_amp,
-                init_lambda,
+                params.init_profile,
+                params.init_v_amp,
+                params.init_lambda,
                 x,
                 y,
-                init_center_x,
-                init_center_y,
-                init_radius,
-                init_spread,
+                params.init_center_x,
+                params.init_center_y,
+                params.init_radius,
+                params.init_spread,
             );
             let mass = sample_mass(
                 &mut rng,
-                mass_profile,
-                mass_mean,
-                mass_stddev,
-                mass_min,
-                mass_max,
-                mass_alpha,
+                params.mass_profile,
+                params.mass_mean,
+                params.mass_stddev,
+                params.mass_min,
+                params.mass_max,
+                params.mass_alpha,
             );
 
             particles.x[i] = x;
@@ -480,7 +479,9 @@ fn sample_initial_position(
             let angle = rng.random_range(0.0..(2.0 * PI));
             (center_x + r * angle.cos(), center_y + r * angle.sin())
         }
-        InitProfile::GalaxyDisk => unreachable!("galaxy-disk uses a two-pass sampler"),
+        InitProfile::GalaxyDisk | InitProfile::Merger => {
+            unreachable!("galaxy-disk/merger use dedicated samplers")
+        }
     }
 }
 
@@ -563,8 +564,171 @@ fn sample_initial_velocity(
                 speed * angle.cos() + jitter_y,
             )
         }
-        InitProfile::GalaxyDisk => unreachable!("galaxy-disk uses a two-pass sampler"),
+        InitProfile::GalaxyDisk | InitProfile::Merger => {
+            unreachable!("galaxy-disk/merger use dedicated samplers")
+        }
     }
+}
+
+fn sample_galaxy_disk_from_params(params: InitParams) -> ParticleSoa {
+    sample_galaxy_disk(
+        params.n,
+        params.seed,
+        params.init_radius,
+        params.init_center_x,
+        params.init_center_y,
+        params.mass_profile,
+        params.mass_mean,
+        params.mass_stddev,
+        params.mass_min,
+        params.mass_max,
+        params.mass_alpha,
+        params.disk_scale_length,
+        params.disk_central_mass_frac,
+        params.disk_dispersion,
+        params.g,
+    )
+}
+
+fn sample_merger(params: InitParams) -> ParticleSoa {
+    let n = params.n;
+    if n == 0 {
+        return ParticleSoa::with_len(0);
+    }
+    if n == 1 {
+        let mut single = params;
+        single.init_profile = InitProfile::GalaxyDisk;
+        return sample_galaxy_disk_from_params(single);
+    }
+
+    let q = params.merger_mass_ratio.clamp(f64::MIN_POSITIVE, 1.0);
+    let mut n2 = ((n as f64) * q / (1.0 + q)).round() as usize;
+    n2 = n2.clamp(1, n - 1);
+    let n1 = n - n2;
+
+    let radius1 = params.init_radius.abs().max(1e-12);
+    let radius2 = radius1 * q.sqrt();
+    let scale1 = params.disk_scale_length;
+    let scale2 = if params.disk_scale_length.is_finite() && params.disk_scale_length > 0.0 {
+        params.disk_scale_length * q.sqrt()
+    } else {
+        0.0
+    };
+
+    let seed2 = params.seed ^ 0xA5A5_A5A5_5A5A_5A5A;
+    let mut primary_params = params;
+    primary_params.n = n1;
+    primary_params.init_profile = InitProfile::GalaxyDisk;
+    primary_params.init_radius = radius1;
+    primary_params.init_center_x = 0.0;
+    primary_params.init_center_y = 0.0;
+    primary_params.disk_scale_length = scale1;
+
+    let mut secondary_params = primary_params;
+    secondary_params.n = n2;
+    secondary_params.seed = seed2;
+    secondary_params.init_radius = radius2;
+    secondary_params.disk_scale_length = scale2;
+
+    let mut primary = sample_galaxy_disk_from_params(primary_params);
+    let mut secondary = sample_galaxy_disk_from_params(secondary_params);
+    if params.merger_spin == MergerSpin::Retrograde {
+        flip_tangential_velocities(&mut secondary, 0.0, 0.0);
+    }
+
+    let mass1 = total_mass(&primary);
+    let raw_mass2 = total_mass(&secondary);
+    let target_mass2 = mass1 * q;
+    let secondary_scale = if raw_mass2 > 0.0 {
+        target_mass2 / raw_mass2
+    } else {
+        1.0
+    };
+    let secondary_velocity_scale = secondary_scale.sqrt();
+    for i in 0..secondary.len() {
+        secondary.m[i] *= secondary_scale;
+        secondary.vx[i] *= secondary_velocity_scale;
+        secondary.vy[i] *= secondary_velocity_scale;
+    }
+    let mass2 = total_mass(&secondary);
+    let total = (mass1 + mass2).max(1e-12);
+
+    let dx = if params.merger_separation.is_finite() && params.merger_separation > 0.0 {
+        params.merger_separation
+    } else {
+        3.0 * radius1
+    };
+    let dy = if params.merger_impact_parameter.is_finite() && params.merger_impact_parameter >= 0.0
+    {
+        params.merger_impact_parameter
+    } else {
+        0.5 * radius1
+    };
+    let v_rel = if params.merger_v_rel.is_finite() && params.merger_v_rel > 0.0 {
+        params.merger_v_rel
+    } else {
+        (2.0 * params.g.abs() * total / dx.max(1e-12)).sqrt()
+    };
+
+    let center_x = params.init_center_x;
+    let center_y = params.init_center_y;
+    let x1 = center_x - mass2 / total * dx;
+    let y1 = center_y - mass2 / total * dy;
+    let x2 = center_x + mass1 / total * dx;
+    let y2 = center_y + mass1 / total * dy;
+    let vx1 = mass2 / total * v_rel;
+    let vx2 = -mass1 / total * v_rel;
+
+    translate_and_boost(&mut primary, x1, y1, vx1, 0.0);
+    translate_and_boost(&mut secondary, x2, y2, vx2, 0.0);
+    concat_particles(primary, secondary)
+}
+
+fn total_mass(particles: &ParticleSoa) -> f64 {
+    particles.m.iter().sum()
+}
+
+fn translate_and_boost(particles: &mut ParticleSoa, dx: f64, dy: f64, dvx: f64, dvy: f64) {
+    for i in 0..particles.len() {
+        particles.x[i] += dx;
+        particles.y[i] += dy;
+        particles.vx[i] += dvx;
+        particles.vy[i] += dvy;
+    }
+}
+
+fn flip_tangential_velocities(particles: &mut ParticleSoa, center_x: f64, center_y: f64) {
+    for i in 0..particles.len() {
+        let dx = particles.x[i] - center_x;
+        let dy = particles.y[i] - center_y;
+        let r = (dx * dx + dy * dy).sqrt();
+        if r <= 1e-12 {
+            continue;
+        }
+        let rx = dx / r;
+        let ry = dy / r;
+        let tx = -ry;
+        let ty = rx;
+        let radial = particles.vx[i] * rx + particles.vy[i] * ry;
+        let tangential = particles.vx[i] * tx + particles.vy[i] * ty;
+        particles.vx[i] = radial * rx - tangential * tx;
+        particles.vy[i] = radial * ry - tangential * ty;
+    }
+}
+
+fn concat_particles(a: ParticleSoa, b: ParticleSoa) -> ParticleSoa {
+    let mut particles = ParticleSoa::with_capacity(a.len() + b.len());
+    particles.x.extend(a.x);
+    particles.y.extend(a.y);
+    particles.vx.extend(a.vx);
+    particles.vy.extend(a.vy);
+    particles.m.extend(a.m);
+    particles.x.extend(b.x);
+    particles.y.extend(b.y);
+    particles.vx.extend(b.vx);
+    particles.vy.extend(b.vy);
+    particles.m.extend(b.m);
+    particles
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -704,27 +868,36 @@ mod tests {
     use super::*;
 
     fn galaxy(seed: u64) -> ParticleSoa {
-        ParticleSoa::random_with_profiles_and_galaxy_disk(
-            6000,
+        ParticleSoa::from_init_params(base_params(6000, seed, InitProfile::GalaxyDisk))
+    }
+
+    fn base_params(n: usize, seed: u64, init_profile: InitProfile) -> InitParams {
+        InitParams {
+            n,
             seed,
-            InitProfile::GalaxyDisk,
-            1.0,
-            1.0,
-            0.05,
-            1.0,
-            0.0,
-            0.0,
-            MassProfile::Uniform,
-            1.0,
-            0.25,
-            0.9,
-            1.1,
-            2.0,
-            0.25,
-            0.1,
-            0.05,
-            1.0,
-        )
+            init_profile,
+            init_radius: 1.0,
+            init_spread: 1.0,
+            init_v_amp: 0.05,
+            init_lambda: 1.0,
+            init_center_x: 0.0,
+            init_center_y: 0.0,
+            mass_profile: MassProfile::Uniform,
+            mass_mean: 1.0,
+            mass_stddev: 0.25,
+            mass_min: 0.9,
+            mass_max: 1.1,
+            mass_alpha: 2.0,
+            disk_scale_length: 0.25,
+            disk_central_mass_frac: 0.1,
+            disk_dispersion: 0.05,
+            g: 1.0,
+            merger_mass_ratio: 1.0,
+            merger_separation: 3.0,
+            merger_impact_parameter: 0.5,
+            merger_v_rel: 0.0,
+            merger_spin: MergerSpin::Prograde,
+        }
     }
 
     fn expected_vc_by_index(particles: &ParticleSoa, g: f64) -> Vec<f64> {
@@ -797,5 +970,129 @@ mod tests {
         assert_eq!(a.vx, b.vx);
         assert_eq!(a.vy, b.vy);
         assert_eq!(a.m, b.m);
+    }
+
+    fn merger_parts(params: InitParams) -> (usize, ParticleSoa, ParticleSoa) {
+        let q = params.merger_mass_ratio.clamp(f64::MIN_POSITIVE, 1.0);
+        let mut n2 = ((params.n as f64) * q / (1.0 + q)).round() as usize;
+        n2 = n2.clamp(1, params.n - 1);
+        let n1 = params.n - n2;
+        let mut p1 = params;
+        p1.n = n1;
+        p1.init_profile = InitProfile::GalaxyDisk;
+        p1.init_center_x = 0.0;
+        p1.init_center_y = 0.0;
+        let mut p2 = p1;
+        p2.n = n2;
+        p2.seed = params.seed ^ 0xA5A5_A5A5_5A5A_5A5A;
+        p2.init_radius = params.init_radius * q.sqrt();
+        p2.disk_scale_length = params.disk_scale_length * q.sqrt();
+        let primary = ParticleSoa::from_init_params(p1);
+        let mut secondary = ParticleSoa::from_init_params(p2);
+        if params.merger_spin == MergerSpin::Retrograde {
+            flip_tangential_velocities(&mut secondary, 0.0, 0.0);
+        }
+        let scale = total_mass(&primary) * q / total_mass(&secondary);
+        let velocity_scale = scale.sqrt();
+        for i in 0..secondary.len() {
+            secondary.m[i] *= scale;
+            secondary.vx[i] *= velocity_scale;
+            secondary.vy[i] *= velocity_scale;
+        }
+        (n1, primary, secondary)
+    }
+
+    #[test]
+    fn merger_same_seed_is_bitwise_deterministic() {
+        let params = base_params(4000, 9917, InitProfile::Merger);
+        let a = ParticleSoa::from_init_params(params);
+        let b = ParticleSoa::from_init_params(params);
+        assert_eq!(a.x, b.x);
+        assert_eq!(a.y, b.y);
+        assert_eq!(a.vx, b.vx);
+        assert_eq!(a.vy, b.vy);
+        assert_eq!(a.m, b.m);
+    }
+
+    #[test]
+    fn merger_bulk_momentum_is_com_zero_after_intrinsic_subtraction_two_seeds() {
+        for seed in [1701_u64, 1902_u64] {
+            let params = InitParams {
+                n: 4096,
+                seed,
+                merger_mass_ratio: 0.65,
+                merger_separation: 3.2,
+                merger_impact_parameter: 0.4,
+                ..base_params(4096, seed, InitProfile::Merger)
+            };
+            let merger = ParticleSoa::from_init_params(params);
+            let (_n1, primary, secondary) = merger_parts(params);
+            let total = total_momentum(&merger);
+            let intrinsic1 = total_momentum(&primary);
+            let intrinsic2 = total_momentum(&secondary);
+            let residual_px = total.px - intrinsic1.px - intrinsic2.px;
+            let residual_py = total.py - intrinsic1.py - intrinsic2.py;
+            println!(
+                "merger_bulk_momentum seed={} total=({:.17e},{:.17e}) intrinsic=({:.17e},{:.17e}) residual=({:.17e},{:.17e}) analytic_bulk=(0,0)",
+                seed,
+                total.px,
+                total.py,
+                intrinsic1.px + intrinsic2.px,
+                intrinsic1.py + intrinsic2.py,
+                residual_px,
+                residual_py
+            );
+            let scale = total.px.abs().max(total.py.abs()).max(1.0);
+            assert!(residual_px.abs() <= 1.0e-10 * scale);
+            assert!(residual_py.abs() <= 1.0e-10 * scale);
+        }
+    }
+
+    #[test]
+    fn merger_sub_galaxies_reuse_galaxy_disk_rotation_bins() {
+        let params = InitParams {
+            n: 8000,
+            seed: 2718,
+            merger_mass_ratio: 0.5,
+            ..base_params(8000, 2718, InitProfile::Merger)
+        };
+        let (n1, primary, secondary) = merger_parts(params);
+        assert_eq!(n1 + secondary.len(), params.n);
+        assert_rotation_bins("merger_primary", &primary, 1.0);
+        assert_rotation_bins("merger_secondary", &secondary, 1.0);
+    }
+
+    fn assert_rotation_bins(label: &str, particles: &ParticleSoa, g: f64) {
+        let expected = expected_vc_by_index(particles, g);
+        for (bin_idx, (lo, hi)) in [(0.05, 0.25), (0.25, 0.55), (0.55, 1.0)]
+            .into_iter()
+            .enumerate()
+        {
+            let mut count = 0_usize;
+            let mut observed_sum = 0.0;
+            let mut expected_sum = 0.0;
+            for (i, expected_vc) in expected.iter().enumerate().skip(1) {
+                let x = particles.x[i];
+                let y = particles.y[i];
+                let r = (x * x + y * y).sqrt();
+                if r < lo || r >= hi {
+                    continue;
+                }
+                let tx = -y / r;
+                let ty = x / r;
+                observed_sum += particles.vx[i] * tx + particles.vy[i] * ty;
+                expected_sum += expected_vc;
+                count += 1;
+            }
+            assert!(count > 30, "{label} bin {bin_idx} samples: {count}");
+            let observed_mean = observed_sum / count as f64;
+            let expected_mean = expected_sum / count as f64;
+            let rel = ((observed_mean - expected_mean) / expected_mean).abs();
+            println!(
+                "{label} rotation bin={} count={} observed_mean_vt={:.9} expected_mean_vc={:.9} rel_err={:.9}",
+                bin_idx, count, observed_mean, expected_mean, rel
+            );
+            assert!(rel <= 0.10, "{label} bin {bin_idx} rel {rel} > 10%");
+        }
     }
 }

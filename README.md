@@ -153,6 +153,19 @@ Preset launcher shortcuts from `run.sh`:
 ./run.sh --preset accurate --n 6000 --steps 350 --mass-profile lognormal --mass-mean 1.0 --mass-alpha 2.2
 ```
 
+### Two-galaxy merger initial condition
+
+`--init merger` composes two `galaxy-disk` realizations from deterministic
+split seeds, then offsets them into a center-of-mass frame. `--merger-mass-ratio`
+sets secondary/primary mass; the secondary radius and disk scale length use the
+simple size--mass scaling `sqrt(q)`. Separation is along x, impact parameter is
+a y offset, and `--merger-spin retrograde` flips the secondary disk's tangential
+rotation.
+
+```bash
+bun run nq -- --init merger --n 40000 --steps 240 --dt 0.0004 --theta 0.7 --epsilon 0.02 --init-radius 1.0 --disk-scale-length 0.25 --merger-mass-ratio 0.75 --merger-separation 3.0 --merger-impact-parameter 0.5 --merger-spin prograde --seed 2718 --view-radius 3.0 --record --frames-dir .sc/merger-demo
+```
+
 Seeded profile example with fixed momentum and a higher-order integrator:
 
 ```bash
