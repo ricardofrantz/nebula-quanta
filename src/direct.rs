@@ -111,6 +111,7 @@ pub fn run_direct(
         particle_bytes: particle_state_bytes(n),
         node_pool_bytes: 0,
         traversal_stack_bytes: 0,
+        tree_build_transient_bytes: 0,
     })
 }
 

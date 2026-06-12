@@ -62,7 +62,7 @@ fn compute_barnes_hut_accel_snapshot_with_threshold(
     let mut ax = vec![0.0; n];
     let mut ay = vec![0.0; n];
     let mut stack = Vec::with_capacity(node_capacity);
-    build_tree(&mut tree, particles)?;
+    build_tree_with_threads(&mut tree, particles, args.threads)?;
     let effective_theta = args.theta_for_step(0, n, tree.root_bounds());
     let epsilon = args.epsilon_for_step(0, n, tree.root_bounds());
     compute_accel_barnes_hut_with_threshold_impl(
@@ -109,7 +109,9 @@ fn run_barnes_hut_with_threshold(
     let particle_state_bytes = particle_state_bytes(n);
     let node_pool_bytes = node_pool_bytes(node_capacity);
     let traversal_stack_bytes = traversal_stack_bytes(node_capacity, active_threads);
-    let workspace_bytes = particle_state_bytes + node_pool_bytes + traversal_stack_bytes;
+    let tree_build_transient_bytes = parallel_tree_build_transient_bytes(n, active_threads)?;
+    let workspace_bytes =
+        particle_state_bytes + node_pool_bytes + traversal_stack_bytes + tree_build_transient_bytes;
     check_memory_budget(args, workspace_bytes)?;
 
     let mut tree = QuadTree::with_capacity(node_capacity);
@@ -129,7 +131,7 @@ fn run_barnes_hut_with_threshold(
     let mut epsilon = args.epsilon_for_step(0, n, tree.root_bounds());
 
     let mut step_start = Instant::now();
-    build_tree(&mut tree, particles)?;
+    build_tree_with_threads(&mut tree, particles, args.threads)?;
     peak_node_count = peak_node_count.max(tree.nodes.len());
     build_elapsed += step_start.elapsed().as_secs_f64() * 1000.0;
     if let Some(recorder) = recorder.as_deref_mut()
@@ -187,7 +189,7 @@ fn run_barnes_hut_with_threshold(
         integrate_elapsed += t.elapsed().as_secs_f64() * 1000.0;
 
         t = Instant::now();
-        build_tree(&mut tree, particles)?;
+        build_tree_with_threads(&mut tree, particles, args.threads)?;
         peak_node_count = peak_node_count.max(tree.nodes.len());
         build_elapsed += t.elapsed().as_secs_f64() * 1000.0;
         theta = args.theta_for_step(step + 1, n, tree.root_bounds());
@@ -237,6 +239,7 @@ fn run_barnes_hut_with_threshold(
         particle_bytes: particle_state_bytes,
         node_pool_bytes,
         traversal_stack_bytes,
+        tree_build_transient_bytes,
     })
 }
 
@@ -267,7 +270,7 @@ fn integrate_rk2_step(
         mid_particles.vy[i] = vy_half;
     }
 
-    build_tree(tree, mid_particles)?;
+    build_tree_with_threads(tree, mid_particles, thread_count)?;
 
     compute_accel_barnes_hut_with_threshold_impl(
         mid_particles,
@@ -294,6 +297,31 @@ fn integrate_rk2_step(
 }
 
 pub fn build_tree(tree: &mut QuadTree, particles: &ParticleSoa) -> Result<(), String> {
+    build_tree_serial(tree, particles)
+}
+
+/// Forces from the resulting tree are bitwise-identical to a serial build's;
+/// node-pool numbering may differ (subtrees are appended bucket-by-bucket),
+/// so consumers of `QuadTree.nodes` must not assume serial insertion order.
+pub fn build_tree_with_threads(
+    tree: &mut QuadTree,
+    particles: &ParticleSoa,
+    thread_count: usize,
+) -> Result<(), String> {
+    let active_threads = thread_count.max(1).min(particles.len().max(1));
+    if active_threads <= 1 || particles.len() < 2 {
+        return build_tree_serial(tree, particles);
+    }
+    if build_tree_parallel_root_quadrants(tree, particles, active_threads).is_err() {
+        // Per-bucket worker pools are sized from the bucket's particle count;
+        // pathologically tight clusters can need deeper subdivision than that
+        // allows. The serial build with the global pool is the backstop.
+        return build_tree_serial(tree, particles);
+    }
+    Ok(())
+}
+
+fn build_tree_serial(tree: &mut QuadTree, particles: &ParticleSoa) -> Result<(), String> {
     let n = particles.len();
     if n == 0 {
         return Ok(());
@@ -331,6 +359,358 @@ pub fn build_tree(tree: &mut QuadTree, particles: &ParticleSoa) -> Result<(), St
 
     for i in 0..n {
         insert_into_node(tree, particles, 0, i)?;
+    }
+
+    Ok(())
+}
+
+struct BuildBucket {
+    node_idx: usize,
+    body_indices: Vec<usize>,
+}
+
+struct BuildBucketWithBounds {
+    bucket: BuildBucket,
+    bounds: Node,
+}
+
+#[inline]
+fn parallel_tree_prefix_depth(thread_count: usize) -> usize {
+    let target_buckets = thread_count.max(1).saturating_mul(4);
+    let mut depth = 0usize;
+    let mut buckets = 1usize;
+    while buckets < target_buckets {
+        depth += 1;
+        buckets = buckets.saturating_mul(4);
+    }
+    depth
+}
+
+#[inline]
+fn build_tree_parallel_root_quadrants(
+    tree: &mut QuadTree,
+    particles: &ParticleSoa,
+    thread_count: usize,
+) -> Result<(), String> {
+    let n = particles.len();
+    if n == 0 {
+        return Ok(());
+    }
+
+    let mut x_min = particles.x[0];
+    let mut x_max = particles.x[0];
+    let mut y_min = particles.y[0];
+    let mut y_max = particles.y[0];
+
+    for i in 1..n {
+        let x = particles.x[i];
+        let y = particles.y[i];
+        if x < x_min {
+            x_min = x;
+        }
+        if x > x_max {
+            x_max = x;
+        }
+        if y < y_min {
+            y_min = y;
+        }
+        if y > y_max {
+            y_max = y;
+        }
+    }
+
+    let spread = (x_max - x_min).max(y_max - y_min);
+    let pad = if spread == 0.0 {
+        1.0e-6
+    } else {
+        spread * 1e-12
+    };
+    tree.reset(x_min - pad, x_max + pad, y_min - pad, y_max + pad);
+
+    let prefix_depth = parallel_tree_prefix_depth(thread_count);
+    let mut body_indices: Vec<usize> = (0..n).collect();
+    let mut scratch = vec![0usize; n];
+    let mut leaf_buckets = Vec::new();
+    build_tree_prefix(
+        tree,
+        particles,
+        0,
+        &mut body_indices,
+        &mut scratch,
+        prefix_depth,
+        &mut leaf_buckets,
+    )?;
+
+    let mut leaf_buckets: Vec<BuildBucketWithBounds> = leaf_buckets
+        .into_iter()
+        .map(|bucket| BuildBucketWithBounds {
+            bounds: tree.nodes[bucket.node_idx],
+            bucket,
+        })
+        .collect();
+    leaf_buckets.sort_by_key(|bucket| bucket.bucket.node_idx);
+
+    let pool = rayon_pool(thread_count)?;
+    let subtrees: Result<Vec<(usize, QuadTree)>, String> = pool.install(|| {
+        leaf_buckets
+            .into_par_iter()
+            .map(|bucket| {
+                let node_idx = bucket.bucket.node_idx;
+                let bounds = bucket.bounds;
+                let subtree_capacity =
+                    preflight_node_capacity(bucket.bucket.body_indices.len())?.saturating_add(1024);
+                let mut subtree = QuadTree::with_capacity(subtree_capacity);
+                subtree.reset(bounds.x_min, bounds.x_max, bounds.y_min, bounds.y_max);
+                fill_subtree_from_ordered_bodies(
+                    &mut subtree,
+                    particles,
+                    0,
+                    bucket.bucket.body_indices,
+                )?;
+                Ok((node_idx, subtree))
+            })
+            .collect()
+    });
+
+    let mut subtrees = subtrees?;
+    subtrees.sort_by_key(|(node_idx, _)| *node_idx);
+    for (node_idx, subtree) in subtrees {
+        let offset = if subtree.nodes.len() > 1 {
+            tree.nodes.len() as i32 - 1
+        } else {
+            0
+        };
+        let mut root_node = subtree.nodes[0];
+        if offset != 0 {
+            for child in &mut root_node.children {
+                if *child >= 0 {
+                    *child += offset;
+                }
+            }
+        }
+        tree.nodes[node_idx] = root_node;
+        let extra_nodes = subtree.nodes.len().saturating_sub(1);
+        if !tree.can_grow(extra_nodes) {
+            return Err(format!(
+                "tree node capacity exceeded while merging parallel subtree (used={}, additional={}, capacity={})",
+                tree.nodes.len(),
+                extra_nodes,
+                tree.capacity()
+            ));
+        }
+        tree.nodes
+            .extend(subtree.nodes.into_iter().skip(1).map(|mut node| {
+                for child in &mut node.children {
+                    if *child >= 0 {
+                        *child += offset;
+                    }
+                }
+                node
+            }));
+    }
+
+    Ok(())
+}
+
+#[inline]
+fn build_tree_prefix(
+    tree: &mut QuadTree,
+    particles: &ParticleSoa,
+    node_idx: usize,
+    body_indices: &mut [usize],
+    scratch: &mut [usize],
+    depth_remaining: usize,
+    buckets: &mut Vec<BuildBucket>,
+) -> Result<(), String> {
+    if body_indices.is_empty() {
+        return Ok(());
+    }
+
+    if depth_remaining == 0 {
+        buckets.push(BuildBucket {
+            node_idx,
+            body_indices: body_indices.to_vec(),
+        });
+        return Ok(());
+    }
+
+    if body_indices.len() == 1 {
+        let body_idx = body_indices[0];
+        let node = &mut tree.nodes[node_idx];
+        node.mass = particles.m[body_idx];
+        node.com_x = particles.x[body_idx];
+        node.com_y = particles.y[body_idx];
+        node.body_idx = body_idx as i32;
+        return Ok(());
+    }
+
+    split_leaf(tree, node_idx)?;
+    tree.nodes[node_idx].body_idx = -1;
+    let node = tree.nodes[node_idx];
+    let mut child_counts = [0usize; 4];
+    for &body_idx in body_indices.iter() {
+        let root = &mut tree.nodes[node_idx];
+        let old_mass = root.mass;
+        let mass = particles.m[body_idx];
+        let new_mass = old_mass + mass;
+        if old_mass == 0.0 {
+            root.com_x = particles.x[body_idx];
+            root.com_y = particles.y[body_idx];
+        } else {
+            let inv_new = 1.0 / new_mass;
+            root.com_x = (root.com_x * old_mass + particles.x[body_idx] * mass) * inv_new;
+            root.com_y = (root.com_y * old_mass + particles.y[body_idx] * mass) * inv_new;
+        }
+        root.mass = new_mass;
+
+        let child = choose_child(
+            node.x_min,
+            node.x_max,
+            node.y_min,
+            node.y_max,
+            particles.x[body_idx],
+            particles.y[body_idx],
+        );
+        child_counts[child] += 1;
+    }
+
+    let starts = [
+        0,
+        child_counts[0],
+        child_counts[0] + child_counts[1],
+        child_counts[0] + child_counts[1] + child_counts[2],
+    ];
+    let mut write_offsets = starts;
+    for &body_idx in body_indices.iter() {
+        let child = choose_child(
+            node.x_min,
+            node.x_max,
+            node.y_min,
+            node.y_max,
+            particles.x[body_idx],
+            particles.y[body_idx],
+        );
+        let slot = write_offsets[child];
+        scratch[slot] = body_idx;
+        write_offsets[child] += 1;
+    }
+    body_indices.copy_from_slice(scratch);
+
+    for child in 0..4 {
+        let start = starts[child];
+        let end = start + child_counts[child];
+        if start == end {
+            continue;
+        }
+        build_tree_prefix(
+            tree,
+            particles,
+            node.children[child] as usize,
+            &mut body_indices[start..end],
+            &mut scratch[start..end],
+            depth_remaining - 1,
+            buckets,
+        )?;
+    }
+
+    Ok(())
+}
+
+#[inline]
+fn fill_subtree_from_ordered_bodies(
+    tree: &mut QuadTree,
+    particles: &ParticleSoa,
+    node_idx: usize,
+    mut body_indices: Vec<usize>,
+) -> Result<(), String> {
+    let mut scratch = vec![0usize; body_indices.len()];
+    fill_subtree_from_ordered_body_slice(tree, particles, node_idx, &mut body_indices, &mut scratch)
+}
+
+#[inline]
+fn fill_subtree_from_ordered_body_slice(
+    tree: &mut QuadTree,
+    particles: &ParticleSoa,
+    node_idx: usize,
+    body_indices: &mut [usize],
+    scratch: &mut [usize],
+) -> Result<(), String> {
+    if body_indices.is_empty() {
+        return Ok(());
+    }
+
+    if body_indices.len() < 16 {
+        for &body_idx in body_indices.iter() {
+            insert_into_node(tree, particles, node_idx, body_idx)?;
+        }
+        return Ok(());
+    }
+
+    split_leaf(tree, node_idx)?;
+    tree.nodes[node_idx].body_idx = -1;
+    let node = tree.nodes[node_idx];
+    let mut child_counts = [0usize; 4];
+    for &body_idx in body_indices.iter() {
+        let root = &mut tree.nodes[node_idx];
+        let old_mass = root.mass;
+        let mass = particles.m[body_idx];
+        let new_mass = old_mass + mass;
+        if old_mass == 0.0 {
+            root.com_x = particles.x[body_idx];
+            root.com_y = particles.y[body_idx];
+        } else {
+            let inv_new = 1.0 / new_mass;
+            root.com_x = (root.com_x * old_mass + particles.x[body_idx] * mass) * inv_new;
+            root.com_y = (root.com_y * old_mass + particles.y[body_idx] * mass) * inv_new;
+        }
+        root.mass = new_mass;
+
+        let child = choose_child(
+            node.x_min,
+            node.x_max,
+            node.y_min,
+            node.y_max,
+            particles.x[body_idx],
+            particles.y[body_idx],
+        );
+        child_counts[child] += 1;
+    }
+
+    let starts = [
+        0,
+        child_counts[0],
+        child_counts[0] + child_counts[1],
+        child_counts[0] + child_counts[1] + child_counts[2],
+    ];
+    let mut write_offsets = starts;
+    for &body_idx in body_indices.iter() {
+        let child = choose_child(
+            node.x_min,
+            node.x_max,
+            node.y_min,
+            node.y_max,
+            particles.x[body_idx],
+            particles.y[body_idx],
+        );
+        let slot = write_offsets[child];
+        scratch[slot] = body_idx;
+        write_offsets[child] += 1;
+    }
+    body_indices.copy_from_slice(scratch);
+
+    for child in 0..4 {
+        let start = starts[child];
+        let end = start + child_counts[child];
+        if start == end {
+            continue;
+        }
+        fill_subtree_from_ordered_body_slice(
+            tree,
+            particles,
+            node.children[child] as usize,
+            &mut body_indices[start..end],
+            &mut scratch[start..end],
+        )?;
     }
 
     Ok(())
@@ -384,7 +764,7 @@ fn insert_into_node(
         insert_into_node(
             tree,
             particles,
-            child_indices[choose_child(
+            child_indices[choose_child_checked(
                 tree.nodes[node_idx].x_min,
                 tree.nodes[node_idx].x_max,
                 tree.nodes[node_idx].y_min,
@@ -397,7 +777,7 @@ fn insert_into_node(
         insert_into_node(
             tree,
             particles,
-            child_indices[choose_child(
+            child_indices[choose_child_checked(
                 tree.nodes[node_idx].x_min,
                 tree.nodes[node_idx].x_max,
                 tree.nodes[node_idx].y_min,
@@ -411,7 +791,7 @@ fn insert_into_node(
         return Ok(());
     }
 
-    let child = choose_child(
+    let child = choose_child_checked(
         tree.nodes[node_idx].x_min,
         tree.nodes[node_idx].x_max,
         tree.nodes[node_idx].y_min,
@@ -427,6 +807,7 @@ fn insert_into_node(
     insert_into_node(tree, particles, child_idx as usize, body_idx)
 }
 
+#[inline]
 fn split_leaf(tree: &mut QuadTree, node_idx: usize) -> Result<(), String> {
     if !tree.nodes[node_idx].is_leaf() {
         return Ok(());
@@ -465,7 +846,8 @@ fn split_leaf(tree: &mut QuadTree, node_idx: usize) -> Result<(), String> {
     Ok(())
 }
 
-fn choose_child(
+#[inline(always)]
+fn choose_child_checked(
     x_min: f64,
     x_max: f64,
     y_min: f64,
@@ -473,18 +855,23 @@ fn choose_child(
     x: f64,
     y: f64,
 ) -> Result<usize, String> {
+    Ok(choose_child(x_min, x_max, y_min, y_max, x, y))
+}
+
+#[inline(always)]
+fn choose_child(x_min: f64, x_max: f64, y_min: f64, y_max: f64, x: f64, y: f64) -> usize {
     let x_mid = 0.5 * (x_min + x_max);
     let y_mid = 0.5 * (y_min + y_max);
 
     let east = x >= x_mid;
     let north = y >= y_mid;
 
-    Ok(match (east, north) {
+    match (east, north) {
         (false, true) => 0,
         (true, true) => 1,
         (false, false) => 2,
         (true, false) => 3,
-    })
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -496,7 +883,6 @@ pub fn compute_accel_barnes_hut(
     g: f64,
     thread_count: usize,
     stack: &mut Vec<usize>,
-    _parallel_workspace: &mut Vec<Vec<usize>>,
     ax: &mut [f64],
     ay: &mut [f64],
 ) -> Result<(), String> {
@@ -524,7 +910,6 @@ pub fn compute_accel_barnes_hut_with_threshold(
     thread_count: usize,
     min_parallel_particles: usize,
     stack: &mut Vec<usize>,
-    _parallel_workspace: &mut Vec<Vec<usize>>,
     ax: &mut [f64],
     ay: &mut [f64],
 ) -> Result<(), String> {
@@ -591,9 +976,7 @@ fn compute_accel_barnes_hut_with_threshold_impl(
         stack,
         ax,
         ay,
-    )?;
-
-    Ok(())
+    )
 }
 
 #[inline]
@@ -798,18 +1181,42 @@ fn traversal_stack_bytes(node_capacity: usize, thread_count: usize) -> usize {
     stack_slots.saturating_mul(USIZE_BYTES)
 }
 
+fn parallel_tree_build_transient_bytes(n: usize, thread_count: usize) -> Result<usize, String> {
+    if thread_count <= 1 || n < 2 {
+        return Ok(0);
+    }
+
+    let prefix_depth = parallel_tree_prefix_depth(thread_count);
+    let bucket_count = 4usize.checked_pow(prefix_depth as u32).ok_or_else(|| {
+        "parallel tree prefix bucket count overflow for memory estimate".to_string()
+    })?;
+    let node_capacity = preflight_node_capacity(n)?;
+    let per_bucket_slack = bucket_count.saturating_mul(1025);
+    // Threaded tree-build transients are intentionally charged separately from
+    // the persistent output tree: the prefix owns/remaps index vectors, each
+    // worker allocates one scratch index buffer, and completed per-bucket
+    // subtrees remain live until deterministic merge.  The Vec growth factor is
+    // bounded conservatively by charging one extra full index layer per prefix
+    // level in addition to the final bucket indices and subtree scratch.
+    let index_layers = prefix_depth.saturating_add(2);
+    let index_bytes = n.saturating_mul(index_layers).saturating_mul(USIZE_BYTES);
+    let subtree_nodes = node_capacity.saturating_add(per_bucket_slack);
+    Ok(index_bytes.saturating_add(node_pool_bytes(subtree_nodes)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        build_tree, compute_accel_barnes_hut, compute_barnes_hut_accel_snapshot,
-        compute_barnes_hut_accel_snapshot_with_threshold, preflight_node_capacity, run_barnes_hut,
-        run_barnes_hut_with_threshold,
+        build_tree, build_tree_with_threads, compute_accel_barnes_hut,
+        compute_barnes_hut_accel_snapshot, compute_barnes_hut_accel_snapshot_with_threshold,
+        node_pool_bytes, parallel_tree_build_transient_bytes, parallel_tree_prefix_depth,
+        preflight_node_capacity, run_barnes_hut, run_barnes_hut_with_threshold,
     };
     use clap::Parser;
     use std::f64::consts::PI;
 
     use crate::{
-        config::Args,
+        config::{Args, InitProfile, MassProfile},
         direct::{compute_direct_accel_with_g, run_direct},
         particle::{
             ParticleSoa, compute_energy_snapshot, compute_exact_energy_snapshot,
@@ -1039,6 +1446,107 @@ mod tests {
                 actual.to_bits()
             );
         }
+    }
+
+    #[test]
+    fn parallel_prefix_depth_scales_past_root_quadrants() {
+        assert_eq!(parallel_tree_prefix_depth(1), 1);
+        assert_eq!(parallel_tree_prefix_depth(12), 3);
+    }
+
+    #[test]
+    fn parallel_tree_build_transients_are_charged_for_threaded_runs() -> Result<(), String> {
+        let n = 100_000usize;
+        assert_eq!(parallel_tree_build_transient_bytes(n, 1)?, 0);
+        assert!(
+            parallel_tree_build_transient_bytes(n, 12)?
+                > node_pool_bytes(preflight_node_capacity(n)?)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parallel_built_tree_forces_match_serial_tree_bitwise() -> Result<(), String> {
+        fn assert_parallel_tree_force_parity(particles: &ParticleSoa) -> Result<(), String> {
+            let n = particles.len();
+            let capacity = preflight_node_capacity(n)?;
+            let mut serial_tree = QuadTree::with_capacity(capacity);
+            let mut parallel_tree = QuadTree::with_capacity(capacity);
+            build_tree(&mut serial_tree, particles)?;
+            build_tree_with_threads(&mut parallel_tree, particles, 12)?;
+
+            let mut serial_ax = vec![0.0; n];
+            let mut serial_ay = vec![0.0; n];
+            let mut parallel_ax = vec![0.0; n];
+            let mut parallel_ay = vec![0.0; n];
+            let mut stack = Vec::with_capacity(capacity);
+            compute_accel_barnes_hut(
+                particles,
+                &serial_tree,
+                0.7,
+                0.01,
+                1.0,
+                1,
+                &mut stack,
+                &mut serial_ax,
+                &mut serial_ay,
+            )?;
+            stack.clear();
+            compute_accel_barnes_hut(
+                particles,
+                &parallel_tree,
+                0.7,
+                0.01,
+                1.0,
+                1,
+                &mut stack,
+                &mut parallel_ax,
+                &mut parallel_ay,
+            )?;
+
+            assert_bitwise_eq("parallel tree ax", 12, &serial_ax, &parallel_ax);
+            assert_bitwise_eq("parallel tree ay", 12, &serial_ay, &parallel_ay);
+            Ok(())
+        }
+
+        let n = 10_000usize;
+        for seed in [42_u64, 1902] {
+            for init in [InitProfile::Plummer, InitProfile::Gaussian] {
+                let particles = ParticleSoa::random_with_profiles(
+                    n,
+                    seed,
+                    init,
+                    1.0,
+                    1.0,
+                    0.05,
+                    1.0,
+                    0.0,
+                    0.0,
+                    MassProfile::Uniform,
+                    1.0,
+                    0.25,
+                    0.5,
+                    2.0,
+                    2.0,
+                );
+                assert_parallel_tree_force_parity(&particles)?;
+            }
+        }
+
+        let mut skewed = ParticleSoa::with_len(n);
+        skewed.x[0] = -1.0;
+        skewed.y[0] = -1.0;
+        skewed.x[1] = -1.0;
+        skewed.y[1] = 1.1;
+        skewed.x[2] = 1.1;
+        skewed.y[2] = -1.0;
+        for i in 3..n {
+            let offset = (i - 3) as f64 * 1.0e-9;
+            skewed.x[i] = 0.95 + offset;
+            skewed.y[i] = 0.95 + offset * 0.5;
+        }
+        assert_parallel_tree_force_parity(&skewed)?;
+        Ok(())
     }
 
     fn regression_particles(args: &Args) -> ParticleSoa {
@@ -1672,7 +2180,6 @@ mod tests {
         let mut tree = QuadTree::with_capacity(preflight_node_capacity(n)?);
         build_tree(&mut tree, &particles)?;
         let mut stack = Vec::with_capacity(preflight_node_capacity(n)?);
-        let mut parallel_workspace = Vec::new();
 
         let mut short_ax = vec![0.0; n - 1];
         let mut short_ay = vec![0.0; n];
@@ -1684,7 +2191,6 @@ mod tests {
             args.g,
             2,
             &mut stack,
-            &mut parallel_workspace,
             &mut short_ax,
             &mut short_ay,
         )
@@ -1704,7 +2210,6 @@ mod tests {
             args.g,
             2,
             &mut stack,
-            &mut parallel_workspace,
             &mut oversized_ax,
             &mut oversized_ay,
         )?;
@@ -1775,7 +2280,6 @@ mod tests {
         let mut bh_ax = vec![0.0; n];
         let mut bh_ay = vec![0.0; n];
         let mut stack = Vec::with_capacity(preflight_node_capacity(n)?);
-        let mut parallel_workspace = Vec::new();
         compute_accel_barnes_hut(
             &particles,
             &tree,
@@ -1784,7 +2288,6 @@ mod tests {
             args.g,
             1,
             &mut stack,
-            &mut parallel_workspace,
             &mut bh_ax,
             &mut bh_ay,
         )?;

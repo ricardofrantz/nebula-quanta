@@ -9,6 +9,7 @@ pub struct RunStats {
     pub particle_bytes: usize,
     pub node_pool_bytes: usize,
     pub traversal_stack_bytes: usize,
+    pub tree_build_transient_bytes: usize,
 }
 
 impl RunStats {
@@ -23,6 +24,7 @@ impl RunStats {
             particle_bytes: 0,
             node_pool_bytes: 0,
             traversal_stack_bytes: 0,
+            tree_build_transient_bytes: 0,
         }
     }
 
@@ -34,7 +36,10 @@ impl RunStats {
     }
 
     pub fn workspace_bytes(&self) -> usize {
-        self.particle_bytes + self.node_pool_bytes + self.traversal_stack_bytes
+        self.particle_bytes
+            + self.node_pool_bytes
+            + self.traversal_stack_bytes
+            + self.tree_build_transient_bytes
     }
 
     pub fn bytes_per_particle(&self) -> f64 {
