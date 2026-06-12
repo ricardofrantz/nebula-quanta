@@ -139,12 +139,6 @@ fn run_barnes_hut_with_threshold(
     build_tree_with_threads(&mut tree, particles, args.threads)?;
     peak_node_count = peak_node_count.max(tree.nodes.len());
     build_elapsed += step_start.elapsed().as_secs_f64() * 1000.0;
-    if let Some(recorder) = recorder.as_deref_mut()
-        && let Some(bounds) = tree.root_bounds()
-    {
-        recorder.record_step(0, particles, bounds)?;
-    }
-
     step_start = Instant::now();
     compute_accel_barnes_hut_with_threshold_impl(
         particles,
@@ -159,6 +153,11 @@ fn run_barnes_hut_with_threshold(
         &mut ay,
     )?;
     force_elapsed += step_start.elapsed().as_secs_f64() * 1000.0;
+    if let Some(recorder) = recorder.as_deref_mut()
+        && let Some(bounds) = tree.root_bounds()
+    {
+        recorder.record_step(0, particles, bounds, &ax, &ay)?;
+    }
 
     let mut step = 0;
     while step < args.steps {
@@ -199,12 +198,6 @@ fn run_barnes_hut_with_threshold(
         build_elapsed += t.elapsed().as_secs_f64() * 1000.0;
         theta = args.theta_for_step(step + 1, n, tree.root_bounds());
         epsilon = args.epsilon_for_step(step + 1, n, tree.root_bounds());
-        if let Some(recorder) = recorder.as_deref_mut()
-            && let Some(bounds) = tree.root_bounds()
-        {
-            recorder.record_step(step + 1, particles, bounds)?;
-        }
-
         t = Instant::now();
         compute_accel_barnes_hut_with_threshold_impl(
             particles,
@@ -219,6 +212,11 @@ fn run_barnes_hut_with_threshold(
             &mut ay,
         )?;
         force_elapsed += t.elapsed().as_secs_f64() * 1000.0;
+        if let Some(recorder) = recorder.as_deref_mut()
+            && let Some(bounds) = tree.root_bounds()
+        {
+            recorder.record_step(step + 1, particles, bounds, &ax, &ay)?;
+        }
 
         t = Instant::now();
         if args.integrator == crate::config::Integrator::Leapfrog

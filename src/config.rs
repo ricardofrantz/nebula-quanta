@@ -125,6 +125,9 @@ pub struct Args {
     pub fps: u32,
     #[arg(long, default_value_t = 1)]
     pub every_steps: usize,
+    /// Comma-separated frame coloring modes: golden,speed,accel,density.
+    #[arg(long, default_value = "golden")]
+    pub color_by: String,
     /// Fixed square view half-width centered on the origin; `0` auto-fits the particle extent per frame.
     #[arg(long, default_value_t = 0.0)]
     pub view_radius: f64,
@@ -136,6 +139,25 @@ pub struct Args {
     /// Energy potential sample ratio for diagnostics (`0` uses exact for small runs when enabled).
     #[arg(long, default_value_t = 0.0)]
     pub energy_sample_ratio: f64,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ColorMode {
+    Golden,
+    Speed,
+    Accel,
+    Density,
+}
+
+impl ColorMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Golden => "golden",
+            Self::Speed => "speed",
+            Self::Accel => "accel",
+            Self::Density => "density",
+        }
+    }
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
@@ -302,6 +324,35 @@ impl Args {
                 self.epsilon * (1.0 + factor)
             }
         }
+    }
+
+    pub fn color_modes(&self) -> Result<Vec<ColorMode>, String> {
+        let mut modes = Vec::new();
+        for raw in self.color_by.split(',') {
+            let token = raw.trim();
+            if token.is_empty() {
+                return Err("--color-by entries must not be empty".to_string());
+            }
+            let mode = match token {
+                "golden" => ColorMode::Golden,
+                "speed" => ColorMode::Speed,
+                "accel" => ColorMode::Accel,
+                "density" => ColorMode::Density,
+                other => {
+                    return Err(format!(
+                        "unknown --color-by mode '{other}'; expected golden,speed,accel,density"
+                    ));
+                }
+            };
+            if modes.contains(&mode) {
+                return Err(format!("duplicate --color-by mode '{token}'"));
+            }
+            modes.push(mode);
+        }
+        if modes.is_empty() {
+            return Err("--color-by must include at least one mode".to_string());
+        }
+        Ok(modes)
     }
 
     pub fn should_measure_energy_drift(&self) -> bool {

@@ -43,7 +43,7 @@ pub fn run_direct(
     }
     build_elapsed += t.elapsed().as_secs_f64() * 1000.0;
     if let Some(recorder) = recorder.as_deref_mut() {
-        recorder.record_step(0, particles, particle_bounds(particles)?)?;
+        recorder.record_step(0, particles, particle_bounds(particles)?, &ax, &ay)?;
     }
 
     let mut step = 0;
@@ -73,10 +73,6 @@ pub fn run_direct(
             }
         }
         integrate_elapsed += t.elapsed().as_secs_f64() * 1000.0;
-        if let Some(recorder) = recorder.as_deref_mut() {
-            recorder.record_step(step + 1, particles, particle_bounds(particles)?)?;
-        }
-
         t = Instant::now();
         epsilon = args.epsilon_for_step(step + 1, n, particle_bounds(particles).ok());
         if g_is_unity {
@@ -85,6 +81,10 @@ pub fn run_direct(
             compute_direct_accel_with_g(particles, epsilon, args.g, &mut ax, &mut ay);
         }
         force_elapsed += t.elapsed().as_secs_f64() * 1000.0;
+
+        if let Some(recorder) = recorder.as_deref_mut() {
+            recorder.record_step(step + 1, particles, particle_bounds(particles)?, &ax, &ay)?;
+        }
 
         t = Instant::now();
         match args.integrator {

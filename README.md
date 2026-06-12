@@ -49,16 +49,19 @@ The GIF is a forward loop with the tail crossfaded into the head; the
 
 ## Gallery
 
-| Clip | GIF | MP4 | Bodies | Precision | Resolution | Frames | Wall-clock | MP4 encode |
-| --- | --- | --- | ---: | --- | --- | ---: | ---: | --- |
-| 1M-body disk instability / clump formation (v2) | [GIF](./assets/gallery-galaxy-disk-1m-v2.gif) | [MP4](./assets/gallery-galaxy-disk-1m-v2.mp4) | 1,000,000 | f64 | 1920x1080 | 51 | 15m18.548s | rev-2 unchanged |
-| Two-galaxy merger (v3) | [GIF](./assets/gallery-merger-1m-v3.gif) | [MP4](./assets/gallery-merger-1m-v3.mp4) | 1,000,000 | f64 | 1920x1080 | 201 | 35m14.060s | H.264 CRF 28 |
+Each MP4 lives in `galery/<clip>/` beside the one-shot `.sh` recipe that
+regenerates it and the `.md` receipt that explains the render.
+
+| Clip | MP4 | Bodies | Precision | Resolution | Frames | Wall-clock | MP4 encode |
+| --- | --- | ---: | --- | --- | ---: | ---: | --- |
+| 1M-body disk instability / clump formation (v2) | [MP4](./galery/gallery-galaxy-disk-1m-v2/gallery-galaxy-disk-1m-v2.mp4) | 1,000,000 | f64 | 1920x1080 | 51 | 15m18.548s | rev-2 unchanged |
+| Two-galaxy merger (v3) | [MP4](./galery/gallery-merger-1m-v3/gallery-merger-1m-v3.mp4) | 1,000,000 | f64 | 1920x1080 | 201 | 35m14.060s | H.264 CRF 28 |
+| Fast Plummer gallery test | [MP4](./galery/gallery-test-plummer-2k/gallery-test-plummer-2k.mp4) | 2,000 | f64 | 640x360 | 21 | quick | test case |
 
 Both gallery clips keep the total simulated mass near the validated 20k-body
 recipes by scaling the 1M-body particle masses to mean 0.02. The disk clip
 shows disk instability and clump formation rather than stable spiral arms. The
-GIFs are preview loops with crossfaded tails; the MP4s are the plain forward
-renders.
+MP4s are the plain forward renders.
 
 ### 1M-body disk instability v2 command
 
@@ -74,7 +77,7 @@ renders.
 | seed | 424242 |
 
 ```bash
-target/release/nq --n 1000000 --steps 3000 --dt 0.000003 --theta 0.7 --epsilon 0.005 --init galaxy-disk --init-radius 1.0 --disk-scale-length 0.25 --disk-dispersion 0.04 --mass-profile lognormal --mass-mean 0.02 --mass-stddev 0.005 --mass-min 0.01 --mass-max 0.04 --seed 424242 --integrator leapfrog --view-radius 1.4 --threads 12 --energy-drift off --width 1920 --height 1080 --record --output assets/gallery-galaxy-disk-1m-v2.mp4 --fps 30 --every-steps 60
+target/release/nq --n 1000000 --steps 3000 --dt 0.000003 --theta 0.7 --epsilon 0.005 --init galaxy-disk --init-radius 1.0 --disk-scale-length 0.25 --disk-dispersion 0.04 --mass-profile lognormal --mass-mean 0.02 --mass-stddev 0.005 --mass-min 0.01 --mass-max 0.04 --seed 424242 --integrator leapfrog --view-radius 1.4 --threads 12 --energy-drift off --width 1920 --height 1080 --record --output galery/gallery-galaxy-disk-1m-v2/gallery-galaxy-disk-1m-v2.mp4 --fps 30 --every-steps 60
 ```
 
 ### Two-galaxy merger v3 command
@@ -91,7 +94,7 @@ target/release/nq --n 1000000 --steps 3000 --dt 0.000003 --theta 0.7 --epsilon 0
 | seed | 271828 |
 
 ```bash
-target/release/nq --n 1000000 --steps 6000 --dt 0.00002 --theta 0.7 --epsilon 0.02 --init merger --init-radius 1.0 --disk-scale-length 0.25 --disk-dispersion 0.04 --merger-mass-ratio 0.75 --merger-separation 3.0 --merger-impact-parameter 0.5 --merger-spin prograde --mass-profile lognormal --mass-mean 0.02 --mass-stddev 0.005 --mass-min 0.01 --mass-max 0.04 --seed 271828 --integrator leapfrog --view-radius 3.4 --threads 12 --energy-drift off --width 1920 --height 1080 --record --output assets/gallery-merger-1m-v3.mp4 --fps 30 --every-steps 30
+target/release/nq --n 1000000 --steps 6000 --dt 0.00002 --theta 0.7 --epsilon 0.02 --init merger --init-radius 1.0 --disk-scale-length 0.25 --disk-dispersion 0.04 --merger-mass-ratio 0.75 --merger-separation 3.0 --merger-impact-parameter 0.5 --merger-spin prograde --mass-profile lognormal --mass-mean 0.02 --mass-stddev 0.005 --mass-min 0.01 --mass-max 0.04 --seed 271828 --integrator leapfrog --view-radius 3.4 --threads 12 --energy-drift off --width 1920 --height 1080 --record --output galery/gallery-merger-1m-v3/gallery-merger-1m-v3.mp4 --fps 30 --every-steps 30
 ```
 
 ## How Barnes–Hut makes it fast
