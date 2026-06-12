@@ -26,11 +26,12 @@ log_file="${script_dir}/${name}.log"
 
 # Scale from gallery-galaxy-disk-1m-v2:
 # - 2x particles for a smoother disk.
-# - Same simulated duration at the same sampling cadence: 51 frames at 30 fps.
+# - Short preview duration: 31 frames at 12 fps, enough to inspect the 4K
+#   speed-colored structure without a one-hour production render.
 # - 4K frame size for inspection on a desktop display.
 # - Half the 1M per-particle mass so total simulated mass stays comparable.
 n=2000000
-steps=3000
+steps=360
 dt=0.000003
 theta=0.7
 epsilon=0.005
@@ -49,8 +50,8 @@ view_radius=1.4
 threads=12
 width=3840
 height=2160
-fps=30
-every_steps=60
+fps=12
+every_steps=12
 progress_every="${every_steps}"
 color_by=speed
 colormap=turbo
