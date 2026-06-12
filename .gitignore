@@ -5,6 +5,10 @@
 /captured_run*/
 /captured_run*.mp4
 
+# per-clip progress logs from gallery recipe reruns (runtime artifact)
+galery/**/*.log
+galery/**/.tmp-*/
+
 # bv (beads viewer) local config and caches
 .bv/
 docs/goals.md

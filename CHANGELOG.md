@@ -9,6 +9,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Quantity-colored particle recordings: `--color-by` now supports `speed`,
   `accel`, `density`, and `mass`, with selectable colormaps and explicit or
   first-frame color normalization controls for MP4 renders.
+- Long-running simulations can print periodic progress with
+  `--progress-every`; gallery recipes now tee stdout/stderr into per-case log
+  files beside the MP4s.
 - Gallery color-study clips with reproducible scripts and receipts: cold
   Plummer density, rotating-disk shear speed, Plummer mass spectrum, and a
   retrograde unequal-mass merger rendered by acceleration magnitude.

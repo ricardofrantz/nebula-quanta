@@ -24,6 +24,7 @@ name="gallery-test-plummer-2k"
 tmp_dir="${script_dir}/.tmp-${name}"
 tmp_mp4="${tmp_dir}/${name}.mp4"
 out_mp4="${script_dir}/${name}.mp4"
+log_file="${script_dir}/${name}.log"
 
 # Fixed simulation settings for this clip. Edit these values in this file to
 # make a new gallery variant; do not pass command-line arguments.
@@ -48,6 +49,7 @@ width=1280
 height=720
 fps=30
 every_steps=2
+progress_every="${every_steps}"
 
 cleanup() {
   rm -rf "${tmp_dir}"
@@ -89,6 +91,8 @@ target/release/nq \
   --record \
   --output "${tmp_mp4}" \
   --fps "${fps}" \
-  --every-steps "${every_steps}"
+  --every-steps "${every_steps}" \
+  --progress-every "${progress_every}" \
+  2>&1 | tee "${log_file}"
 
 mv "${tmp_mp4}" "${out_mp4}"

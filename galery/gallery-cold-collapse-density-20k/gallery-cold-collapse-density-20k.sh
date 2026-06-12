@@ -13,6 +13,7 @@ name="gallery-cold-collapse-density-20k"
 tmp_dir="${script_dir}/.tmp-${name}"
 tmp_mp4="${tmp_dir}/${name}.mp4"
 out_mp4="${script_dir}/${name}.mp4"
+log_file="${script_dir}/${name}.log"
 
 n=20000
 steps=420
@@ -36,6 +37,7 @@ width=960
 height=540
 fps=30
 every_steps=4
+progress_every="${every_steps}"
 color_by=density
 colormap=magma
 color_scale=asinh
@@ -83,6 +85,8 @@ target/release/nq \
   --colormap "${colormap}" \
   --color-scale "${color_scale}" \
   --color-auto "${color_auto}" \
-  --color-headroom "${color_headroom}"
+  --color-headroom "${color_headroom}" \
+  --progress-every "${progress_every}" \
+  2>&1 | tee "${log_file}"
 
 mv "${tmp_mp4}" "${out_mp4}"

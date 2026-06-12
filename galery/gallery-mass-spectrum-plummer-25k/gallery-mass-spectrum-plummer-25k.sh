@@ -13,6 +13,7 @@ name="gallery-mass-spectrum-plummer-25k"
 tmp_dir="${script_dir}/.tmp-${name}"
 tmp_mp4="${tmp_dir}/${name}.mp4"
 out_mp4="${script_dir}/${name}.mp4"
+log_file="${script_dir}/${name}.log"
 
 n=25000
 steps=360
@@ -37,6 +38,7 @@ width=960
 height=540
 fps=30
 every_steps=4
+progress_every="${every_steps}"
 color_by=mass
 colormap=plasma
 color_scale=log
@@ -85,6 +87,8 @@ target/release/nq \
   --colormap "${colormap}" \
   --color-scale "${color_scale}" \
   --color-min "${color_min}" \
-  --color-max "${color_max}"
+  --color-max "${color_max}" \
+  --progress-every "${progress_every}" \
+  2>&1 | tee "${log_file}"
 
 mv "${tmp_mp4}" "${out_mp4}"

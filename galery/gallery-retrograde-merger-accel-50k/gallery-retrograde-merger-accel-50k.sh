@@ -13,6 +13,7 @@ name="gallery-retrograde-merger-accel-50k"
 tmp_dir="${script_dir}/.tmp-${name}"
 tmp_mp4="${tmp_dir}/${name}.mp4"
 out_mp4="${script_dir}/${name}.mp4"
+log_file="${script_dir}/${name}.log"
 
 n=50000
 # Longer than the first gallery pass: keep the liked encounter parameters, but
@@ -43,6 +44,7 @@ height=720
 fps=30
 # 1800 steps / 6 gives 301 frames including step zero: about 10 seconds at 30 fps.
 every_steps=6
+progress_every="${every_steps}"
 color_by=accel
 colormap=inferno
 color_scale=asinh
@@ -94,6 +96,8 @@ target/release/nq \
   --colormap "${colormap}" \
   --color-scale "${color_scale}" \
   --color-auto "${color_auto}" \
-  --color-headroom "${color_headroom}"
+  --color-headroom "${color_headroom}" \
+  --progress-every "${progress_every}" \
+  2>&1 | tee "${log_file}"
 
 mv "${tmp_mp4}" "${out_mp4}"

@@ -50,7 +50,8 @@ The GIF is a forward loop with the tail crossfaded into the head; the
 ## Gallery
 
 Each MP4 lives in `galery/<clip>/` beside the one-shot `.sh` recipe that
-regenerates it and the `.md` receipt that explains the render.
+regenerates it, the `.md` receipt that explains the render, and a `.log` file
+when the recipe is rerun with progress output enabled.
 
 | Clip | MP4 | Bodies | Precision | Resolution | Frames | Wall-clock | MP4 encode |
 | --- | --- | ---: | --- | --- | ---: | ---: | --- |
@@ -268,6 +269,10 @@ record_frames=401 render_cmd="ffmpeg -y -framerate 60 -i capture/frame_%06d.ppm 
 ```
 
 For very long runs, reduce I/O using `--every-steps K` and keep K tuned to your target duration.
+Use `--progress-every K` to print periodic stderr progress lines with the
+current step, recorded frame count, elapsed time, throughput, and ETA. Gallery
+recipes capture stdout and stderr to `<clip>.log` with `tee`, so long renders
+can be monitored without waiting for the final summary line.
 
 ```bash
 ffmpeg -y -framerate 60 -i capture/frame_%06d.ppm -c:v libx264 -crf 0 -pix_fmt yuv444p nebula-quanta-barnes_hut.mp4
