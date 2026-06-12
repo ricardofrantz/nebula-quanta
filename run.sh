@@ -53,6 +53,7 @@ Physics controls:
   --preset <fast|balanced|accurate>
   --threads <thread_count> (performance control, includes Barnes-Hut and preset overrides)
   --frames-dir <dir> --width <px> --height <px> --fps <fps> --every-steps <n>
+  --progress-every <steps> (0 disables progress output)
   --color-by <golden|speed|accel|density|mass>[,...]
   --colormap <mode|gold|inferno|viridis|magma|plasma|turbo|blue-red>
   --color-scale <asinh|linear|log>
@@ -108,6 +109,7 @@ WIDTH=1920
 HEIGHT=1080
 FPS=60
 EVERY_STEPS=1
+PROGRESS_EVERY=0
 COLOR_BY="golden"
 COLORMAP="mode"
 COLOR_SCALE="asinh"
@@ -167,6 +169,7 @@ gif=$GIF
   height=$HEIGHT
   fps=$FPS
   every_steps=$EVERY_STEPS
+  progress_every=$PROGRESS_EVERY
   color_by=$COLOR_BY
   colormap=$COLORMAP
   color_scale=$COLOR_SCALE
@@ -344,6 +347,10 @@ while [[ $# -gt 0 ]]; do
       EVERY_STEPS=$2
       shift 2
       ;;
+    --progress-every)
+      PROGRESS_EVERY=$2
+      shift 2
+      ;;
     --color-by)
       COLOR_BY=$2
       shift 2
@@ -447,7 +454,15 @@ else
   GIF_ARG=()
 fi
 
-RECORD_ARGS=(--record --frames-dir "$FRAMES_DIR" --width "$WIDTH" --height "$HEIGHT" --fps "$FPS" --every-steps "$EVERY_STEPS")
+RECORD_ARGS=(
+  --record
+  --frames-dir "$FRAMES_DIR"
+  --width "$WIDTH"
+  --height "$HEIGHT"
+  --fps "$FPS"
+  --every-steps "$EVERY_STEPS"
+  --progress-every "$PROGRESS_EVERY"
+)
 COLOR_ARGS=(
   --color-by "$COLOR_BY"
   --colormap "$COLORMAP"

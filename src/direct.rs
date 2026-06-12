@@ -5,6 +5,7 @@ use crate::{
     config::Args,
     frame::FrameRecorder,
     particle::{ParticleSoa, particle_bounds},
+    progress::ProgressReporter,
     stats::RunStats,
 };
 
@@ -34,6 +35,7 @@ pub fn run_direct(
     let mut rk2_ay = vec![0.0; n];
     let g_is_unity = (args.g - 1.0).abs() <= f64::EPSILON;
     let mut epsilon = args.epsilon_for_step(0, n, particle_bounds(particles).ok());
+    let mut progress = ProgressReporter::from_args(args, "direct");
 
     let mut t = Instant::now();
     if g_is_unity {
@@ -44,6 +46,9 @@ pub fn run_direct(
     build_elapsed += t.elapsed().as_secs_f64() * 1000.0;
     if let Some(recorder) = recorder.as_deref_mut() {
         recorder.record_step(0, particles, particle_bounds(particles)?, &ax, &ay)?;
+    }
+    if let Some(progress) = progress.as_mut() {
+        progress.maybe_report(0, recorder.as_deref());
     }
 
     let mut step = 0;
@@ -84,6 +89,9 @@ pub fn run_direct(
 
         if let Some(recorder) = recorder.as_deref_mut() {
             recorder.record_step(step + 1, particles, particle_bounds(particles)?, &ax, &ay)?;
+        }
+        if let Some(progress) = progress.as_mut() {
+            progress.maybe_report(step + 1, recorder.as_deref());
         }
 
         t = Instant::now();

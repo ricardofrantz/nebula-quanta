@@ -125,6 +125,9 @@ pub struct Args {
     pub fps: u32,
     #[arg(long, default_value_t = 1)]
     pub every_steps: usize,
+    /// Print progress every N simulation steps; 0 disables progress output.
+    #[arg(long, default_value_t = 0)]
+    pub progress_every: usize,
     /// Comma-separated frame coloring modes: golden,speed,accel,density,mass.
     #[arg(long, default_value = "golden")]
     pub color_by: String,
@@ -606,6 +609,8 @@ mod tests {
         let parsed = Args::try_parse_from([
             "nq",
             "--record",
+            "--progress-every",
+            "25",
             "--color-by",
             "speed",
             "--colormap",
@@ -623,6 +628,7 @@ mod tests {
         ]);
 
         assert!(parsed.is_ok(), "unexpected parse error: {parsed:?}");
+        assert_eq!(parsed.unwrap().progress_every, 25);
     }
 
     #[test]

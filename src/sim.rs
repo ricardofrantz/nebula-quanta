@@ -10,6 +10,7 @@ use crate::{
     direct::{compute_direct_accel_with_g, run_direct as run_direct_reference},
     frame::FrameRecorder,
     particle::{ParticleSoa, particle_bounds},
+    progress::ProgressReporter,
     stats::RunStats,
     tree::{Node, QuadTree},
 };
@@ -127,6 +128,7 @@ fn run_barnes_hut_with_threshold(
     let mut rk2_particles = particles.clone();
     let mut rk2_ax = vec![0.0; n];
     let mut rk2_ay = vec![0.0; n];
+    let mut progress = ProgressReporter::from_args(args, "barnes_hut");
 
     let mut build_elapsed = 0.0;
     let mut force_elapsed = 0.0;
@@ -157,6 +159,9 @@ fn run_barnes_hut_with_threshold(
         && let Some(bounds) = tree.root_bounds()
     {
         recorder.record_step(0, particles, bounds, &ax, &ay)?;
+    }
+    if let Some(progress) = progress.as_mut() {
+        progress.maybe_report(0, recorder.as_deref());
     }
 
     let mut step = 0;
@@ -216,6 +221,9 @@ fn run_barnes_hut_with_threshold(
             && let Some(bounds) = tree.root_bounds()
         {
             recorder.record_step(step + 1, particles, bounds, &ax, &ay)?;
+        }
+        if let Some(progress) = progress.as_mut() {
+            progress.maybe_report(step + 1, recorder.as_deref());
         }
 
         t = Instant::now();

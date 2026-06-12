@@ -195,6 +195,7 @@ const VALUE_OPTIONS = new Set([
   '--height',
   '--fps',
   '--every-steps',
+  '--progress-every',
   '--color-by',
   '--colormap',
   '--color-scale',
