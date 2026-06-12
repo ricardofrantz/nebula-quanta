@@ -155,6 +155,7 @@ The short executable name is `nq` and the Rust crate is `nebula-quanta`.
 - Deterministic benchmarks
 - High-rate frame capture
 - Offline MP4 rendering
+- Quantity-colored particle renders
 - Memory telemetry
 - Energy/momentum diagnostics
 
@@ -235,6 +236,25 @@ bun run nq \
   -- --mode=barnes_hut --n 20000 --steps 400 --dt 0.0008 --theta 0.7 \
   --record --output nebula-quanta-barnes_hut.mp4 --width 1920 --height 1080 --fps 60 --every-steps 1
 ```
+
+Particles can be colored by a scalar quantity during recording:
+
+```bash
+bun run nq \
+  -- --mode=barnes_hut --n 20000 --steps 400 --dt 0.0008 --theta 0.7 \
+  --record --output speed.mp4 --width 1920 --height 1080 --fps 60 --every-steps 1 \
+  --color-by speed --colormap viridis --color-scale linear --color-min 0 --color-max 1.2
+```
+
+`--color-by` accepts `golden`, `speed`, `accel`, `density`, and `mass`.
+Comma-separated values create simultaneous outputs from one physics run; for
+example `--color-by speed,accel,density --output clip.mp4` writes `clip.mp4`,
+`clip-accel.mp4`, and `clip-density.mp4`. `--colormap` accepts `mode`, `gold`,
+`inferno`, `viridis`, `magma`, `plasma`, `turbo`, and `blue-red`. Use
+`--color-scale asinh|linear|log`, `--color-min auto|value`,
+`--color-max auto|value`, `--color-auto first-p99|first-p95|first-minmax`, and
+`--color-headroom <factor>` to control normalization. With defaults, `golden`
+and the existing quantity palettes keep their previous look.
 
 The fallback PPM path still works with `--record --frames-dir ./capture`. It prints `record_frames` and a ready-to-run `render_cmd`, for example:
 

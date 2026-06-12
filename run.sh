@@ -53,6 +53,12 @@ Physics controls:
   --preset <fast|balanced|accurate>
   --threads <thread_count> (performance control, includes Barnes-Hut and preset overrides)
   --frames-dir <dir> --width <px> --height <px> --fps <fps> --every-steps <n>
+  --color-by <golden|speed|accel|density|mass>[,...]
+  --colormap <mode|gold|inferno|viridis|magma|plasma|turbo|blue-red>
+  --color-scale <asinh|linear|log>
+  --color-min <auto|value> --color-max <auto|value>
+  --color-auto <first-p99|first-p95|first-minmax>
+  --color-headroom <factor>
 
 Utility:
   --show-config   print all resolved flags without running
@@ -102,6 +108,13 @@ WIDTH=1920
 HEIGHT=1080
 FPS=60
 EVERY_STEPS=1
+COLOR_BY="golden"
+COLORMAP="mode"
+COLOR_SCALE="asinh"
+COLOR_MIN="auto"
+COLOR_MAX="auto"
+COLOR_AUTO="first-p99"
+COLOR_HEADROOM=1.5
 SHOW_CONFIG=0
 
 declare -a EXTRA_ARGS=()
@@ -109,6 +122,7 @@ declare -a MAX_MEMORY_ARG=()
 declare -a VALIDATE_ARG=()
 declare -a GIF_ARG=()
 declare -a RECORD_ARGS=()
+declare -a COLOR_ARGS=()
 
 show_config() {
   cat <<CFG
@@ -153,6 +167,13 @@ gif=$GIF
   height=$HEIGHT
   fps=$FPS
   every_steps=$EVERY_STEPS
+  color_by=$COLOR_BY
+  colormap=$COLORMAP
+  color_scale=$COLOR_SCALE
+  color_min=$COLOR_MIN
+  color_max=$COLOR_MAX
+  color_auto=$COLOR_AUTO
+  color_headroom=$COLOR_HEADROOM
   extra_args_count=${#EXTRA_ARGS[@]}
 CFG
 }
@@ -323,6 +344,34 @@ while [[ $# -gt 0 ]]; do
       EVERY_STEPS=$2
       shift 2
       ;;
+    --color-by)
+      COLOR_BY=$2
+      shift 2
+      ;;
+    --colormap)
+      COLORMAP=$2
+      shift 2
+      ;;
+    --color-scale)
+      COLOR_SCALE=$2
+      shift 2
+      ;;
+    --color-min)
+      COLOR_MIN=$2
+      shift 2
+      ;;
+    --color-max)
+      COLOR_MAX=$2
+      shift 2
+      ;;
+    --color-auto)
+      COLOR_AUTO=$2
+      shift 2
+      ;;
+    --color-headroom)
+      COLOR_HEADROOM=$2
+      shift 2
+      ;;
     --)
       shift
       while [[ $# -gt 0 ]]; do
@@ -399,6 +448,15 @@ else
 fi
 
 RECORD_ARGS=(--record --frames-dir "$FRAMES_DIR" --width "$WIDTH" --height "$HEIGHT" --fps "$FPS" --every-steps "$EVERY_STEPS")
+COLOR_ARGS=(
+  --color-by "$COLOR_BY"
+  --colormap "$COLORMAP"
+  --color-scale "$COLOR_SCALE"
+  --color-min "$COLOR_MIN"
+  --color-max "$COLOR_MAX"
+  --color-auto "$COLOR_AUTO"
+  --color-headroom "$COLOR_HEADROOM"
+)
 
 if [[ "$SHOW_CONFIG" -eq 1 ]]; then
   show_config
@@ -476,5 +534,6 @@ bun run nq -- \
   "${MAX_MEMORY_ARG[@]+"${MAX_MEMORY_ARG[@]}"}" \
   "${VALIDATE_ARG[@]+"${VALIDATE_ARG[@]}"}" \
   "${RECORD_ARGS[@]+"${RECORD_ARGS[@]}"}" \
+  "${COLOR_ARGS[@]+"${COLOR_ARGS[@]}"}" \
   "${GIF_ARG[@]+"${GIF_ARG[@]}"}" \
   "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"

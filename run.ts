@@ -195,6 +195,13 @@ const VALUE_OPTIONS = new Set([
   '--height',
   '--fps',
   '--every-steps',
+  '--color-by',
+  '--colormap',
+  '--color-scale',
+  '--color-min',
+  '--color-max',
+  '--color-auto',
+  '--color-headroom',
 ]);
 
 const BOOL_OPTIONS = new Set(['--validate', '--record', '--gif']);

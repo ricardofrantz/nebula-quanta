@@ -125,9 +125,27 @@ pub struct Args {
     pub fps: u32,
     #[arg(long, default_value_t = 1)]
     pub every_steps: usize,
-    /// Comma-separated frame coloring modes: golden,speed,accel,density.
+    /// Comma-separated frame coloring modes: golden,speed,accel,density,mass.
     #[arg(long, default_value = "golden")]
     pub color_by: String,
+    /// Colormap for non-golden color modes. `mode` preserves the built-in per-quantity palettes.
+    #[arg(long, default_value = "mode", value_enum)]
+    pub colormap: ColorMap,
+    /// Scalar-to-color transfer function for non-golden color modes.
+    #[arg(long, default_value = "asinh", value_enum)]
+    pub color_scale: ColorScale,
+    /// Lower color normalization bound, or `auto`.
+    #[arg(long, default_value = "auto")]
+    pub color_min: String,
+    /// Upper color normalization bound, or `auto`.
+    #[arg(long, default_value = "auto")]
+    pub color_max: String,
+    /// First-recorded-frame automatic normalization statistic.
+    #[arg(long, default_value = "first-p99", value_enum)]
+    pub color_auto: ColorAuto,
+    /// Multiplicative headroom applied to automatic upper bounds.
+    #[arg(long, default_value_t = 1.5)]
+    pub color_headroom: f64,
     /// Fixed square view half-width centered on the origin; `0` auto-fits the particle extent per frame.
     #[arg(long, default_value_t = 0.0)]
     pub view_radius: f64,
@@ -147,6 +165,7 @@ pub enum ColorMode {
     Speed,
     Accel,
     Density,
+    Mass,
 }
 
 impl ColorMode {
@@ -156,8 +175,40 @@ impl ColorMode {
             Self::Speed => "speed",
             Self::Accel => "accel",
             Self::Density => "density",
+            Self::Mass => "mass",
         }
     }
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ColorMap {
+    /// Preserve the built-in palette associated with each `--color-by` mode.
+    Mode,
+    Gold,
+    Inferno,
+    Viridis,
+    Magma,
+    Plasma,
+    Turbo,
+    #[value(name = "blue-red")]
+    BlueRed,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ColorScale {
+    Linear,
+    Log,
+    Asinh,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ColorAuto {
+    #[value(name = "first-p99", alias = "p99")]
+    FirstP99,
+    #[value(name = "first-p95", alias = "p95")]
+    FirstP95,
+    #[value(name = "first-minmax", alias = "minmax")]
+    FirstMinmax,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
@@ -338,9 +389,10 @@ impl Args {
                 "speed" => ColorMode::Speed,
                 "accel" => ColorMode::Accel,
                 "density" => ColorMode::Density,
+                "mass" => ColorMode::Mass,
                 other => {
                     return Err(format!(
-                        "unknown --color-by mode '{other}'; expected golden,speed,accel,density"
+                        "unknown --color-by mode '{other}'; expected golden,speed,accel,density,mass"
                     ));
                 }
             };
@@ -547,6 +599,30 @@ mod tests {
         ])
         .unwrap_err();
         assert!(err.to_string().contains("cannot be used"));
+    }
+
+    #[test]
+    fn accepts_color_mapping_flags() {
+        let parsed = Args::try_parse_from([
+            "nq",
+            "--record",
+            "--color-by",
+            "speed",
+            "--colormap",
+            "viridis",
+            "--color-scale",
+            "linear",
+            "--color-min",
+            "0.2",
+            "--color-max",
+            "2.0",
+            "--color-auto",
+            "first-p95",
+            "--color-headroom",
+            "2.0",
+        ]);
+
+        assert!(parsed.is_ok(), "unexpected parse error: {parsed:?}");
     }
 
     #[test]

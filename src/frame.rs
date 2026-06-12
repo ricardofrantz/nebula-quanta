@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 
 use crate::{
-    config::{Args, ColorMode},
+    config::{Args, ColorAuto, ColorMap, ColorMode, ColorScale},
     particle::ParticleSoa,
 };
 
@@ -27,7 +27,112 @@ pub struct FrameRecorder {
 struct ModeSink {
     mode: ColorMode,
     sink: FrameSink,
-    scale: Option<f64>,
+    mapping: ColorMapping,
+    range: Option<ColorRange>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ColorMapping {
+    colormap: ColorMap,
+    scale: ColorScale,
+    min: Option<f64>,
+    max: Option<f64>,
+    auto: ColorAuto,
+    headroom: f64,
+    legacy_asinh_auto: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ColorRange {
+    min: f64,
+    max: f64,
+}
+
+#[derive(Clone, Copy)]
+struct RenderSpec {
+    background: [u8; 3],
+    trail_decay: f32,
+    point_radius: i32,
+    width: u32,
+    height: u32,
+}
+
+#[derive(Clone, Copy)]
+struct ColorRender {
+    mode: ColorMode,
+    mapping: ColorMapping,
+    range: Option<ColorRange>,
+}
+
+impl ColorMapping {
+    fn from_args(args: &Args) -> Result<Self, String> {
+        let min = parse_color_bound("--color-min", &args.color_min)?;
+        let max = parse_color_bound("--color-max", &args.color_max)?;
+        if let (Some(min), Some(max)) = (min, max)
+            && min >= max
+        {
+            return Err("--color-min must be less than --color-max".to_string());
+        }
+        if args.color_scale == ColorScale::Log
+            && let Some(min) = min
+            && min <= 0.0
+        {
+            return Err("--color-min must be greater than zero when --color-scale=log".to_string());
+        }
+        if !args.color_headroom.is_finite() || args.color_headroom <= 0.0 {
+            return Err("--color-headroom must be finite and greater than zero".to_string());
+        }
+
+        Ok(Self {
+            colormap: args.colormap,
+            scale: args.color_scale,
+            min,
+            max,
+            auto: args.color_auto,
+            headroom: args.color_headroom,
+            legacy_asinh_auto: args.colormap == ColorMap::Mode
+                && args.color_scale == ColorScale::Asinh
+                && min.is_none()
+                && max.is_none()
+                && args.color_auto == ColorAuto::FirstP99
+                && (args.color_headroom - 1.5).abs() <= f64::EPSILON,
+        })
+    }
+
+    fn first_frame_range(self, values: &[f64]) -> ColorRange {
+        if self.legacy_asinh_auto {
+            return ColorRange {
+                min: 0.0,
+                max: first_frame_scale(values),
+            };
+        }
+
+        let min = self
+            .min
+            .unwrap_or_else(|| auto_min(values, self.scale, self.auto));
+        let mut max = self
+            .max
+            .unwrap_or_else(|| auto_max(values, self.auto, self.headroom));
+        if self.scale == ColorScale::Log {
+            max = max.max(min * (1.0 + f64::EPSILON));
+        } else {
+            max = max.max(min + f64::EPSILON);
+        }
+        ColorRange { min, max }
+    }
+}
+
+fn parse_color_bound(name: &str, raw: &str) -> Result<Option<f64>, String> {
+    if raw.eq_ignore_ascii_case("auto") {
+        return Ok(None);
+    }
+    let value = raw
+        .parse::<f64>()
+        .map_err(|err| format!("{name} must be `auto` or a finite number: {err}"))?;
+    if !value.is_finite() {
+        return Err(format!("{name} must be `auto` or a finite number"));
+    }
+    Ok(Some(value))
 }
 
 impl FrameRecorder {
@@ -43,6 +148,7 @@ impl FrameRecorder {
         }
 
         let modes = args.color_modes()?;
+        let mapping = ColorMapping::from_args(args)?;
         let width = args.width;
         let height = args.height;
         let buffer_len = frame_byte_size(width, height)?;
@@ -66,7 +172,8 @@ impl FrameRecorder {
             sinks.push(ModeSink {
                 mode,
                 sink,
-                scale: None,
+                mapping,
+                range: None,
             });
         }
         let background = [0, 0, 0];
@@ -111,28 +218,31 @@ impl FrameRecorder {
         let quantities = frame_quantities(&self.sinks, particles, bounds, ax, ay);
         for (sink_index, quantities) in quantities.iter().enumerate() {
             if self.sinks[sink_index].mode != ColorMode::Golden
-                && self.sinks[sink_index].scale.is_none()
+                && self.sinks[sink_index].range.is_none()
             {
-                self.sinks[sink_index].scale = Some(first_frame_scale(quantities));
+                let mapping = self.sinks[sink_index].mapping;
+                self.sinks[sink_index].range = Some(mapping.first_frame_range(quantities));
             }
         }
-        for i in 0..self.sinks.len() {
-            let mode = self.sinks[i].mode;
-            let scale = self.sinks[i].scale;
-            render_particles_into(
-                &mut self.buffers[i],
-                self.background,
-                self.trail_decay,
-                self.point_radius,
-                self.width,
-                self.height,
-                self.view_radius,
-                particles,
-                bounds,
-                mode,
-                scale,
-                &quantities[i],
-            )?;
+        let render_spec = RenderSpec {
+            background: self.background,
+            trail_decay: self.trail_decay,
+            point_radius: self.point_radius,
+            width: self.width,
+            height: self.height,
+        };
+        for ((buffer, sink), quantities) in self
+            .buffers
+            .iter_mut()
+            .zip(&self.sinks)
+            .zip(quantities.iter())
+        {
+            let color = ColorRender {
+                mode: sink.mode,
+                mapping: sink.mapping,
+                range: sink.range,
+            };
+            render_particles_into(buffer, render_spec, particles, bounds, color, quantities)?;
         }
         let frame_index = self.next_index;
         self.next_index = self.next_index.saturating_add(1);
@@ -161,7 +271,10 @@ impl FrameRecorder {
             .join(",")
     }
     pub fn color_scale_receipts(&self) -> Vec<(ColorMode, Option<f64>)> {
-        self.sinks.iter().map(|s| (s.mode, s.scale)).collect()
+        self.sinks
+            .iter()
+            .map(|s| (s.mode, s.range.map(|range| range.max)))
+            .collect()
     }
 
     pub fn finish(&mut self) -> Result<(), String> {
@@ -209,33 +322,27 @@ impl FrameRecorder {
 
 fn render_particles_into(
     buffer: &mut [u8],
-    background: [u8; 3],
-    trail_decay: f32,
-    point_radius: i32,
-    width_u32: u32,
-    height_u32: u32,
-    _view_radius: f64,
+    spec: RenderSpec,
     particles: &ParticleSoa,
     bounds: (f64, f64, f64, f64),
-    mode: ColorMode,
-    scale: Option<f64>,
+    color: ColorRender,
     quantities: &[f64],
 ) -> Result<(), String> {
     for pixel in buffer.chunks_exact_mut(3) {
-        pixel[0] = decayed_channel(pixel[0], background[0], trail_decay);
-        pixel[1] = decayed_channel(pixel[1], background[1], trail_decay);
-        pixel[2] = decayed_channel(pixel[2], background[2], trail_decay);
+        pixel[0] = decayed_channel(pixel[0], spec.background[0], spec.trail_decay);
+        pixel[1] = decayed_channel(pixel[1], spec.background[1], spec.trail_decay);
+        pixel[2] = decayed_channel(pixel[2], spec.background[2], spec.trail_decay);
     }
     let (x_min, x_max, y_min, y_max) = bounds;
-    let width = f64::from(width_u32);
-    let height = f64::from(height_u32);
+    let width = f64::from(spec.width);
+    let height = f64::from(spec.height);
     let sx = (width - 1.0) / (x_max - x_min).max(1e-12);
     let sy = (height - 1.0) / (y_max - y_min).max(1e-12);
-    let x_dim = usize::try_from(width_u32).map_err(|_| "invalid frame width".to_string())?;
-    let w = i64::from(width_u32);
-    let h = i64::from(height_u32);
-    let dot_kernel = dot_kernel(point_radius);
-    for i in 0..particles.len() {
+    let x_dim = usize::try_from(spec.width).map_err(|_| "invalid frame width".to_string())?;
+    let w = i64::from(spec.width);
+    let h = i64::from(spec.height);
+    let dot_kernel = dot_kernel(spec.point_radius);
+    for (i, quantity) in quantities.iter().enumerate().take(particles.len()) {
         let x = particles.x[i];
         let y = particles.y[i];
         if !x.is_finite() || !y.is_finite() {
@@ -264,9 +371,10 @@ fn render_particles_into(
             stamp_ink_mode(
                 &mut buffer[idx..idx + 3],
                 falloff,
-                mode,
-                scale,
-                quantities[i],
+                color.mode,
+                color.mapping,
+                color.range,
+                *quantity,
             );
         }
     }
@@ -289,6 +397,7 @@ fn frame_quantities(
                 .collect(),
             ColorMode::Accel => (0..particles.len()).map(|i| ax[i].hypot(ay[i])).collect(),
             ColorMode::Density => leaf_bucket_density(particles, bounds),
+            ColorMode::Mass => particles.m.clone(),
         })
         .collect()
 }
@@ -330,7 +439,24 @@ fn leaf_bucket_density(particles: &ParticleSoa, bounds: (f64, f64, f64, f64)) ->
         .collect()
 }
 
-fn first_frame_scale(values: &[f64]) -> f64 {
+fn auto_min(values: &[f64], scale: ColorScale, auto: ColorAuto) -> f64 {
+    let finite = values.iter().copied().filter(|v| v.is_finite());
+    match scale {
+        ColorScale::Log => finite
+            .filter(|v| *v > 0.0)
+            .min_by(f64::total_cmp)
+            .unwrap_or(f64::MIN_POSITIVE),
+        ColorScale::Linear | ColorScale::Asinh => {
+            if auto == ColorAuto::FirstMinmax {
+                finite.min_by(f64::total_cmp).unwrap_or(0.0)
+            } else {
+                0.0
+            }
+        }
+    }
+}
+
+fn auto_max(values: &[f64], auto: ColorAuto, headroom: f64) -> f64 {
     let mut finite: Vec<f64> = values
         .iter()
         .copied()
@@ -340,8 +466,21 @@ fn first_frame_scale(values: &[f64]) -> f64 {
         return 1.0;
     }
     finite.sort_by(f64::total_cmp);
-    let idx = ((finite.len() - 1) * 99) / 100;
-    (finite[idx] * 1.5).max(f64::EPSILON)
+    let value = match auto {
+        ColorAuto::FirstP99 => percentile_sorted(&finite, 99),
+        ColorAuto::FirstP95 => percentile_sorted(&finite, 95),
+        ColorAuto::FirstMinmax => finite[finite.len() - 1],
+    };
+    (value * headroom).max(f64::EPSILON)
+}
+
+fn percentile_sorted(values: &[f64], percentile: usize) -> f64 {
+    let idx = ((values.len() - 1) * percentile) / 100;
+    values[idx]
+}
+
+fn first_frame_scale(values: &[f64]) -> f64 {
+    auto_max(values, ColorAuto::FirstP99, 1.5)
 }
 
 fn output_for_mode(output: &str, mode: ColorMode, index: usize) -> Result<String, String> {
@@ -385,34 +524,135 @@ fn stamp_ink_mode(
     pixel: &mut [u8],
     falloff: f32,
     mode: ColorMode,
-    scale: Option<f64>,
+    mapping: ColorMapping,
+    range: Option<ColorRange>,
     quantity: f64,
 ) {
     if mode == ColorMode::Golden {
         stamp_ink(pixel, falloff);
         return;
     }
-    let scale = scale.unwrap_or(1.0).max(f64::EPSILON);
-    let t = (quantity.max(0.0) / scale).asinh().clamp(0.0, 1.0) as f32;
-    let color = gradient(mode, t);
+    let t = color_fraction(quantity, mapping, range);
+    let color = gradient(mode, mapping.colormap, t);
     for (channel, value) in pixel.iter_mut().zip(color) {
         let ink = (f32::from(value) * falloff).round() as u8;
         *channel = channel.saturating_add(ink);
     }
 }
 
-fn gradient(mode: ColorMode, t: f32) -> [u8; 3] {
-    let stops = match mode {
-        ColorMode::Speed => [[90, 0, 0], [255, 190, 0], [255, 255, 255]],
-        ColorMode::Accel => [[0, 8, 90], [0, 220, 255], [255, 255, 255]],
-        ColorMode::Density => [[45, 0, 80], [255, 0, 200], [255, 255, 255]],
-        ColorMode::Golden => [[255, 200, 110], [255, 200, 110], [255, 200, 110]],
-    };
-    let (a, b, u) = if t <= 0.5 {
-        (stops[0], stops[1], t * 2.0)
-    } else {
-        (stops[1], stops[2], (t - 0.5) * 2.0)
-    };
+fn color_fraction(quantity: f64, mapping: ColorMapping, range: Option<ColorRange>) -> f32 {
+    if !quantity.is_finite() {
+        return 0.0;
+    }
+    let range = range.unwrap_or(ColorRange { min: 0.0, max: 1.0 });
+    if mapping.legacy_asinh_auto {
+        let scale = range.max.max(f64::EPSILON);
+        return (quantity.max(0.0) / scale).asinh().clamp(0.0, 1.0) as f32;
+    }
+
+    match mapping.scale {
+        ColorScale::Linear => normalize_linear(quantity, range),
+        ColorScale::Asinh => normalize_asinh(quantity, range),
+        ColorScale::Log => normalize_log(quantity, range),
+    }
+}
+
+fn normalize_linear(value: f64, range: ColorRange) -> f32 {
+    ((value - range.min) / (range.max - range.min).max(f64::EPSILON)).clamp(0.0, 1.0) as f32
+}
+
+fn normalize_asinh(value: f64, range: ColorRange) -> f32 {
+    let normalized = ((value - range.min) / (range.max - range.min).max(f64::EPSILON)).max(0.0);
+    (normalized.asinh() / 1.0_f64.asinh()).clamp(0.0, 1.0) as f32
+}
+
+fn normalize_log(value: f64, range: ColorRange) -> f32 {
+    if value <= range.min || range.min <= 0.0 {
+        return 0.0;
+    }
+    let denom = (range.max.ln() - range.min.ln()).max(f64::EPSILON);
+    ((value.ln() - range.min.ln()) / denom).clamp(0.0, 1.0) as f32
+}
+
+fn gradient(mode: ColorMode, colormap: ColorMap, t: f32) -> [u8; 3] {
+    match colormap {
+        ColorMap::Mode => gradient_stops(mode_stops(mode), t),
+        ColorMap::Gold => gradient_stops(&[[90, 40, 0], [255, 200, 110], [255, 255, 220]], t),
+        ColorMap::Inferno => gradient_stops(
+            &[
+                [0, 0, 4],
+                [87, 15, 109],
+                [187, 55, 84],
+                [249, 142, 8],
+                [252, 255, 164],
+            ],
+            t,
+        ),
+        ColorMap::Viridis => gradient_stops(
+            &[
+                [68, 1, 84],
+                [59, 82, 139],
+                [33, 145, 140],
+                [94, 201, 98],
+                [253, 231, 37],
+            ],
+            t,
+        ),
+        ColorMap::Magma => gradient_stops(
+            &[
+                [0, 0, 4],
+                [80, 18, 123],
+                [182, 54, 121],
+                [251, 136, 97],
+                [252, 253, 191],
+            ],
+            t,
+        ),
+        ColorMap::Plasma => gradient_stops(
+            &[
+                [13, 8, 135],
+                [126, 3, 168],
+                [203, 71, 119],
+                [248, 149, 64],
+                [240, 249, 33],
+            ],
+            t,
+        ),
+        ColorMap::Turbo => gradient_stops(
+            &[
+                [48, 18, 59],
+                [50, 120, 238],
+                [28, 216, 197],
+                [251, 234, 35],
+                [122, 4, 3],
+            ],
+            t,
+        ),
+        ColorMap::BlueRed => gradient_stops(&[[0, 32, 120], [245, 245, 245], [150, 0, 0]], t),
+    }
+}
+
+fn mode_stops(mode: ColorMode) -> &'static [[u8; 3]] {
+    match mode {
+        ColorMode::Speed => &[[90, 0, 0], [255, 190, 0], [255, 255, 255]],
+        ColorMode::Accel => &[[0, 8, 90], [0, 220, 255], [255, 255, 255]],
+        ColorMode::Density => &[[45, 0, 80], [255, 0, 200], [255, 255, 255]],
+        ColorMode::Mass => &[[20, 40, 10], [120, 220, 80], [255, 255, 230]],
+        ColorMode::Golden => &[[255, 200, 110], [255, 200, 110], [255, 200, 110]],
+    }
+}
+
+fn gradient_stops(stops: &[[u8; 3]], t: f32) -> [u8; 3] {
+    debug_assert!(!stops.is_empty());
+    if stops.len() == 1 {
+        return stops[0];
+    }
+    let t = t.clamp(0.0, 1.0);
+    let scaled = t * (stops.len() - 1) as f32;
+    let index = (scaled.floor() as usize).min(stops.len() - 2);
+    let u = scaled - index as f32;
+    let a = stops[index];
+    let b = stops[index + 1];
     [
         lerp(a[0], b[0], u),
         lerp(a[1], b[1], u),
@@ -554,13 +794,16 @@ fn frame_byte_size(width: u32, height: u32) -> Result<usize, String> {
 #[cfg(test)]
 mod tests {
     use super::{FfmpegSink, FrameRecorder, first_frame_scale};
-    use crate::{config::Args, particle::ParticleSoa};
+    use crate::{
+        config::{Args, ColorMode},
+        particle::ParticleSoa,
+    };
     use clap::Parser;
     use std::fs;
     use std::io::Write;
     use std::path::Path;
 
-    fn recorder_args(extra: &[&str]) -> Args {
+    fn recorder_args_vec<'a>(extra: &'a [&'a str]) -> Vec<&'a str> {
         let mut args = vec![
             "nq",
             "--record",
@@ -574,6 +817,11 @@ mod tests {
             "2.0",
         ];
         args.extend_from_slice(extra);
+        args
+    }
+
+    fn recorder_args(extra: &[&str]) -> Args {
+        let args = recorder_args_vec(extra);
         Args::parse_from(args)
     }
     fn write_executable(path: &Path, body: &str) {
@@ -697,5 +945,116 @@ mod tests {
     #[test]
     fn p99_scale_has_headroom() {
         assert_eq!(first_frame_scale(&[1.0, 2.0, 100.0]), 3.0);
+    }
+
+    #[test]
+    fn explicit_color_range_overrides_first_frame_scale() {
+        let args = Args::try_parse_from(recorder_args_vec(&[
+            "--color-by",
+            "speed",
+            "--color-min",
+            "2.0",
+            "--color-max",
+            "10.0",
+        ]))
+        .unwrap();
+        let mut rec = FrameRecorder::new(&args).unwrap();
+        let mut p = ParticleSoa::with_len(1);
+        p.x = vec![0.0];
+        p.y = vec![0.0];
+        p.vx = vec![1000.0];
+        p.vy = vec![0.0];
+        p.m = vec![1.0];
+
+        rec.record_step(0, &p, (-1.0, 1.0, -1.0, 1.0), &[0.0], &[0.0])
+            .unwrap();
+
+        assert_eq!(
+            rec.color_scale_receipts(),
+            vec![(ColorMode::Speed, Some(10.0))]
+        );
+    }
+
+    #[test]
+    fn invalid_explicit_color_range_is_rejected() {
+        let args = Args::try_parse_from(recorder_args_vec(&[
+            "--color-by",
+            "speed",
+            "--color-min",
+            "10.0",
+            "--color-max",
+            "2.0",
+        ]))
+        .unwrap();
+
+        let err = FrameRecorder::new(&args).unwrap_err();
+
+        assert!(err.contains("color-min"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn viridis_colormap_reaches_high_stop_for_explicit_linear_max() {
+        let _ = fs::remove_dir_all(".sc/frame-test-frames");
+        let args = Args::try_parse_from(recorder_args_vec(&[
+            "--color-by",
+            "speed",
+            "--colormap",
+            "viridis",
+            "--color-scale",
+            "linear",
+            "--color-min",
+            "0.0",
+            "--color-max",
+            "1.0",
+        ]))
+        .unwrap();
+        let mut rec = FrameRecorder::new(&args).unwrap();
+        let mut p = ParticleSoa::with_len(1);
+        p.x = vec![0.0];
+        p.y = vec![0.0];
+        p.vx = vec![1.0];
+        p.vy = vec![0.0];
+        p.m = vec![1.0];
+
+        rec.record_step(0, &p, (-1.0, 1.0, -1.0, 1.0), &[0.0], &[0.0])
+            .unwrap();
+
+        let ppm = fs::read(".sc/frame-test-frames/frame_000000.ppm").unwrap();
+        let header_len = b"P6\n9 9\n255\n".len();
+        let center = header_len + ((4 * 9 + 4) * 3);
+        assert_eq!(&ppm[center..center + 3], &[253, 231, 37]);
+    }
+
+    #[test]
+    fn golden_mode_ignores_color_mapping_controls() {
+        let _ = fs::remove_dir_all(".sc/frame-test-frames");
+        let args = Args::try_parse_from(recorder_args_vec(&[
+            "--color-by",
+            "golden",
+            "--colormap",
+            "viridis",
+            "--color-scale",
+            "linear",
+            "--color-min",
+            "0.0",
+            "--color-max",
+            "1.0",
+        ]))
+        .unwrap();
+        let mut rec = FrameRecorder::new(&args).unwrap();
+        let mut p = ParticleSoa::with_len(1);
+        p.x = vec![0.0];
+        p.y = vec![0.0];
+        p.vx = vec![1.0];
+        p.vy = vec![0.0];
+        p.m = vec![1.0];
+
+        rec.record_step(0, &p, (-1.0, 1.0, -1.0, 1.0), &[0.0], &[0.0])
+            .unwrap();
+
+        let ppm = fs::read(".sc/frame-test-frames/frame_000000.ppm").unwrap();
+        let header_len = b"P6\n9 9\n255\n".len();
+        let center = header_len + ((4 * 9 + 4) * 3);
+        assert_eq!(&ppm[center..center + 3], &[255, 200, 110]);
     }
 }
