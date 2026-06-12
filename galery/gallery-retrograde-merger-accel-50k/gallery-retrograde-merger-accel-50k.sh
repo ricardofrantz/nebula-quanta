@@ -15,7 +15,9 @@ tmp_mp4="${tmp_dir}/${name}.mp4"
 out_mp4="${script_dir}/${name}.mp4"
 
 n=50000
-steps=760
+# Longer than the first gallery pass: keep the liked encounter parameters, but
+# carry the simulation through the bridge, tail growth, and compact remnant.
+steps=1800
 dt=0.00002
 theta=0.7
 epsilon=0.02
@@ -36,15 +38,16 @@ seed=424200
 integrator=leapfrog
 view_radius=3.0
 threads=12
-width=960
-height=540
+width=1280
+height=720
 fps=30
-every_steps=8
+# 1800 steps / 6 gives 301 frames including step zero: about 10 seconds at 30 fps.
+every_steps=6
 color_by=accel
 colormap=inferno
 color_scale=asinh
 color_auto=first-p99
-color_headroom=2.0
+color_headroom=3.0
 
 cleanup() {
   rm -rf "${tmp_dir}"

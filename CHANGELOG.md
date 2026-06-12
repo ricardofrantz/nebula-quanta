@@ -22,6 +22,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - README opens with a didactic explainer: what an N-body simulation is, the cold-collapse physics behind the hero clip (with its full parameter table), and how the Barnes-Hut quadtree plus a zero-allocation hot loop make it fast.
 
 ### Changed
+- Retrograde acceleration gallery clip re-rendered as a longer 1280x720,
+  301-frame pass so the bridge, tidal debris, and remnant clumps have time to
+  develop.
 - Tree builds below a measured 16,000-particle crossover now route to the serial builder even with `--threads > 1` — the threaded build's partition overhead dominates below that point (up to 6x slower at N=1k). The crossover sweep and threshold rationale are recorded in `BENCHMARKS.md`; forces are unchanged.
 - Quadtree construction got a deterministic prefix-partition restructure: the serial build is 2.4x faster at N=100k (34.5 ms → 14.7 ms), and `--threads > 1` additionally schedules all leaf buckets across the rayon pool for a 4.7x threaded build vs the old serial (7.3 ms at 12 threads), with forces bitwise-identical to the previous build. The bucket-contiguous node layout also speeds up force traversal ~2.4x at N=100k as a side effect. Transient build allocations are charged against `--max-memory-mib`.
 - Barnes-Hut force evaluation now scales with `--threads`: a persistent rayon pool with work-stealing over disjoint 64-particle chunks replaces per-call thread spawning, and the 50,000-particle single-thread fallback is gone. Measured 7.9x at N=10k and 11.1x at N=100k on 12 threads with bitwise-identical forces across thread counts; `--threads 1` stays strictly serial. Memory telemetry now charges the traversal stacks actually allocated.
