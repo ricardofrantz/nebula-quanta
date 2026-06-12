@@ -56,6 +56,7 @@ when the recipe is rerun with progress output enabled.
 | Clip | MP4 | Bodies | Precision | Resolution | Frames | Wall-clock | MP4 encode |
 | --- | --- | ---: | --- | --- | ---: | ---: | --- |
 | 1M-body disk instability / clump formation (v2) | [MP4](./galery/gallery-galaxy-disk-1m-v2/gallery-galaxy-disk-1m-v2.mp4) | 1,000,000 | f64 | 1920x1080 | 51 | 15m18.548s | rev-2 unchanged |
+| 2M-body 4K disk speed preview | [MP4](./galery/gallery-galaxy-disk-2m/gallery-galaxy-disk-2m.mp4) | 2,000,000 | f64 | 3840x2160 | 31 | 8:38.85 | speed/turbo |
 | Two-galaxy merger (v3) | [MP4](./galery/gallery-merger-1m-v3/gallery-merger-1m-v3.mp4) | 1,000,000 | f64 | 1920x1080 | 201 | 35m14.060s | H.264 CRF 28 |
 | Cold Plummer collapse, density-colored | [MP4](./galery/gallery-cold-collapse-density-20k/gallery-cold-collapse-density-20k.mp4) | 20,000 | f64 | 960x540 | 106 | 15.68s | density/magma |
 | Rotating disk shear fragmentation, speed-colored | [MP4](./galery/gallery-shear-fragmentation-speed-35k/gallery-shear-fragmentation-speed-35k.mp4) | 35,000 | f64 | 960x540 | 91 | 20.00s | speed/turbo |

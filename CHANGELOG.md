@@ -15,6 +15,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Gallery color-study clips with reproducible scripts and receipts: cold
   Plummer density, rotating-disk shear speed, Plummer mass spectrum, and a
   retrograde unequal-mass merger rendered by acceleration magnitude.
+- 2M-body 4K galaxy-disk speed preview gallery clip with a reproducible recipe
+  and measured progress log.
 - README Gallery: two million-body showcase clips with full parameter receipts and exact seeded commands — a 1M-body disk-instability render (the cold disk fragmenting into clumps, 3,000 steps) and a 1M-body two-galaxy merger through its first passage and tidal-stream phase (6,000 steps, 35 min on 12 threads). Every clip regenerates bit-reproducibly from its published command.
 - `--init merger`: two-galaxy collision initial condition composing two `galaxy-disk` realizations in the center-of-mass frame — `--merger-mass-ratio` (secondary scaled by `sqrt(q)` in size, masses rescaled exactly to `q`), `--merger-separation`, `--merger-impact-parameter`, `--merger-v-rel` (default near-parabolic `sqrt(2GM/d)`), and `--merger-spin prograde|retrograde`. Bulk momenta cancel to f64 roundoff; each sub-galaxy passes the same rotation-curve checks as a standalone disk.
 - `--init galaxy-disk`: exponential surface-density disk with a central point mass (`--disk-central-mass-frac`), circular speeds computed from the actual enclosed discrete mass `v_c(r)=sqrt(G*M(<r)/r)`, and a Gaussian velocity-dispersion knob (`--disk-dispersion`, a simple fraction of local `v_c` — not a Toomre-Q analysis). `--disk-scale-length` sets the exponential scale length; rotation-curve and bitwise-determinism tests included.
