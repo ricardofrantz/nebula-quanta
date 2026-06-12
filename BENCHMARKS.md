@@ -101,6 +101,25 @@ pre-pf3 low-N `threads=4` rows matched `--threads 1` within run-to-run noise.
 - 2026-06-12 post-p43 note: the prefix-partition build also changed the node-pool layout (bucket-contiguous subtrees), which improved FORCE traversal locality — the production bh_force rows at N=100k now measure 109.4 ms (1 thread) and 10.5 ms (12 threads) vs the 267.30/24.126 ms rows in the pf3 section above; those pf3 rows are the pre-p43-layout baseline (supervisor-verified, loadavg 0.97).
 - Supervisor verdict (final, after rev 3): accepted as the best honest state. The literal >=4x-vs-same-code-serial criterion reads 2.02x, but only because the serial build itself got 2.4x faster during the work (34.5 ms -> 14.7 ms at N=100k); in absolute terms the 12-thread build at 7.28 ms beats the original target's implied bound (34.5 ms / 4 = 8.6 ms), and against the bead-start serial baseline the threaded build is 4.7x. Supervisor re-bench (loadavg `0.59`) reproduced 15.6 ms / 7.04 ms. Physics: serial and 12-thread runs are bitwise-identical to the pre-change commit over a 20-step N=10k A/B. Known trade-off: threaded build is slower than serial build below ~10k particles (N=1k: 199 µs vs 65 µs); a measured small-N build crossover is filed as follow-up.
 
+### Small-N build crossover (nebula-quanta-cxp)
+
+- Date: 2026-06-12
+- Machine: nexus-dev, AMD Ryzen 9 9900X 12-Core Processor; Rust `rustc 1.96.0 (ac68faa20 2026-05-25)`
+- Command: `cargo run --release -- --mode barnes_hut --n {1000,2000,4000,8000,12000,16000,32000} --steps 1 --dt 0.001 --theta 0.7 --epsilon 0.01 --init plummer --seed 42 --threads {1,12} --energy-sample-ratio 0.0 2>&1 | tee .sc/cxp-sweep-pre.log`
+- Loadavg: every row started with 1-minute loadavg `0.21` (< 2.0); full per-row `/proc/loadavg` is in `.sc/cxp-sweep-pre.log`.
+- Result: the first clean win for the 12-thread build is at N=16,000, bracketed by N=12,000 where serial is still slightly faster. Production threshold: `MIN_PARALLEL_TREE_BUILD_PARTICLES = 16_000`; `build_tree_with_threads` routes serially below 16k and uses the threaded path at/above 16k.
+- Above-threshold check: post-change N=100k one-step runs in `.sc/cxp-100k-post2.log` measured total build_ms 29.184 ms (threads=1, two builds) and 16.954 ms (threads=12, two builds), i.e. ~14.6 ms vs ~8.5 ms per build, consistent with p43's 100k rows; the threshold branch is inactive at N=100k.
+
+| N | Threads=1 build_ms | Threads=12 build_ms | Loadavg before rows |
+| ---: | ---: | ---: | --- |
+| 1,000 | 0.168 ms | 1.025 ms | `0.21 1.13 5.01` |
+| 2,000 | 0.312 ms | 1.191 ms | `0.21 1.13 5.01` |
+| 4,000 | 0.674 ms | 1.580 ms | `0.21 1.13 5.01` |
+| 8,000 | 1.502 ms | 2.079 ms | `0.21 1.13 5.01` |
+| 12,000 | 2.716 ms | 2.769 ms | `0.21 1.13 5.01` |
+| 16,000 | 3.557 ms | 3.434 ms | `0.21 1.13 5.01` |
+| 32,000 | 7.680 ms | 5.323 ms | `0.21 1.13 5.01` |
+
 - Rev 2 supervisor verification (loadavg `0.60`): 28.362 ms / 8.587 ms = 3.30x reproduced; serial and 12-thread runs produce bitwise-identical physics to the pre-change commit over a 20-step N=10k A/B (positions and momenta compared at full precision).
 - Rev 3 verdict: leaf-bucket scheduling is in place and parity remains green, but the original >=4x target is still not met on this run. Known trade-off remains: at N=1k the threaded build is slower than serial build, though force-eval gains can keep `--threads 12` a net win.
 

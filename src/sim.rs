@@ -20,6 +20,11 @@ use crate::{
 // while `--threads 1` remains strictly serial.
 pub const MIN_PARALLEL_BH_PARTICLES: usize = 1;
 
+// Measured 2026-06-12 on nexus-dev (AMD Ryzen 9 9900X): one-step Plummer
+// build_ms at N=12,000 was serial 2.716 ms vs 12T 2.769 ms; at N=16,000 it
+// was serial 3.557 ms vs 12T 3.434 ms. Route builds below 16k to serial.
+pub const MIN_PARALLEL_TREE_BUILD_PARTICLES: usize = 16_000;
+
 const PARTICLE_CHUNK_LEN: usize = 64;
 const TRAVERSAL_STACK_CAPACITY: usize = 4_096;
 
@@ -308,8 +313,22 @@ pub fn build_tree_with_threads(
     particles: &ParticleSoa,
     thread_count: usize,
 ) -> Result<(), String> {
+    build_tree_with_threads_with_threshold(
+        tree,
+        particles,
+        thread_count,
+        MIN_PARALLEL_TREE_BUILD_PARTICLES,
+    )
+}
+
+pub fn build_tree_with_threads_with_threshold(
+    tree: &mut QuadTree,
+    particles: &ParticleSoa,
+    thread_count: usize,
+    min_parallel_particles: usize,
+) -> Result<(), String> {
     let active_threads = thread_count.max(1).min(particles.len().max(1));
-    if active_threads <= 1 || particles.len() < 2 {
+    if active_threads <= 1 || particles.len() < 2 || particles.len() < min_parallel_particles {
         return build_tree_serial(tree, particles);
     }
     if build_tree_parallel_root_quadrants(tree, particles, active_threads).is_err() {
@@ -1182,7 +1201,7 @@ fn traversal_stack_bytes(node_capacity: usize, thread_count: usize) -> usize {
 }
 
 fn parallel_tree_build_transient_bytes(n: usize, thread_count: usize) -> Result<usize, String> {
-    if thread_count <= 1 || n < 2 {
+    if thread_count <= 1 || n < 2 || n < MIN_PARALLEL_TREE_BUILD_PARTICLES {
         return Ok(0);
     }
 
@@ -1207,7 +1226,8 @@ fn parallel_tree_build_transient_bytes(n: usize, thread_count: usize) -> Result<
 #[cfg(test)]
 mod tests {
     use super::{
-        build_tree, build_tree_with_threads, compute_accel_barnes_hut,
+        MIN_PARALLEL_TREE_BUILD_PARTICLES, build_tree, build_tree_with_threads,
+        build_tree_with_threads_with_threshold, compute_accel_barnes_hut,
         compute_barnes_hut_accel_snapshot, compute_barnes_hut_accel_snapshot_with_threshold,
         node_pool_bytes, parallel_tree_build_transient_bytes, parallel_tree_prefix_depth,
         preflight_node_capacity, run_barnes_hut, run_barnes_hut_with_threshold,
@@ -1465,6 +1485,141 @@ mod tests {
         Ok(())
     }
 
+    type NodeFingerprint = (u64, u64, u64, u64, u64, u64, u64, i32, [i32; 4]);
+
+    fn tree_fingerprint(tree: &QuadTree) -> Vec<NodeFingerprint> {
+        tree.nodes
+            .iter()
+            .map(|node| {
+                (
+                    node.x_min.to_bits(),
+                    node.x_max.to_bits(),
+                    node.y_min.to_bits(),
+                    node.y_max.to_bits(),
+                    node.mass.to_bits(),
+                    node.com_x.to_bits(),
+                    node.com_y.to_bits(),
+                    node.body_idx,
+                    node.children,
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn tree_build_threshold_routes_low_n_serial_but_injected_zero_exercises_parallel_path()
+    -> Result<(), String> {
+        let n = 4_097usize;
+        assert!(n < MIN_PARALLEL_TREE_BUILD_PARTICLES);
+        let particles = ParticleSoa::random_with_profiles(
+            n,
+            42,
+            InitProfile::Plummer,
+            1.0,
+            1.0,
+            0.05,
+            1.0,
+            0.0,
+            0.0,
+            MassProfile::Uniform,
+            1.0,
+            0.25,
+            0.5,
+            2.0,
+            2.0,
+        );
+        let capacity = preflight_node_capacity(n)?;
+        let mut serial_tree = QuadTree::with_capacity(capacity);
+        let mut default_threaded_tree = QuadTree::with_capacity(capacity);
+        let mut forced_threaded_tree = QuadTree::with_capacity(capacity);
+
+        build_tree(&mut serial_tree, &particles)?;
+        build_tree_with_threads(&mut default_threaded_tree, &particles, 12)?;
+        build_tree_with_threads_with_threshold(&mut forced_threaded_tree, &particles, 12, 0)?;
+
+        assert_eq!(
+            tree_fingerprint(&serial_tree),
+            tree_fingerprint(&default_threaded_tree)
+        );
+        assert_ne!(
+            tree_fingerprint(&serial_tree),
+            tree_fingerprint(&forced_threaded_tree)
+        );
+
+        let mut serial_ax = vec![0.0; n];
+        let mut serial_ay = vec![0.0; n];
+        let mut forced_ax = vec![0.0; n];
+        let mut forced_ay = vec![0.0; n];
+        let mut stack = Vec::with_capacity(capacity);
+        compute_accel_barnes_hut(
+            &particles,
+            &serial_tree,
+            0.7,
+            0.01,
+            1.0,
+            1,
+            &mut stack,
+            &mut serial_ax,
+            &mut serial_ay,
+        )?;
+        stack.clear();
+        compute_accel_barnes_hut(
+            &particles,
+            &forced_threaded_tree,
+            0.7,
+            0.01,
+            1.0,
+            1,
+            &mut stack,
+            &mut forced_ax,
+            &mut forced_ay,
+        )?;
+        assert_bitwise_eq("forced parallel tree ax", 12, &serial_ax, &forced_ax);
+        assert_bitwise_eq("forced parallel tree ay", 12, &serial_ay, &forced_ay);
+        Ok(())
+    }
+
+    #[test]
+    fn pathological_identical_cluster_uses_serial_backstop_when_parallel_bucket_overflows()
+    -> Result<(), String> {
+        let n = 10_000usize;
+        let grid = 9_900usize;
+        let mut particles = ParticleSoa::with_len(n);
+        // 9,900 grid-spread particles keep the TOTAL node count well under
+        // the main pool (4n+1), so the serial build always succeeds.
+        for i in 0..grid {
+            particles.x[i] = -1.0 + (i % 100) as f64 * 0.019;
+            particles.y[i] = -1.0 + (i / 100) as f64 * 0.019;
+        }
+        // 50 near-degenerate pairs in one corner: separating a pair whose
+        // members sit 1e-12 apart costs ~4 nodes per subdivision level, so
+        // this single prefix bucket needs ~4k nodes against its local
+        // budget of 4*100+1+1024 — the per-bucket overflow the serial
+        // backstop exists for.
+        for pair in 0..50 {
+            let base = 0.95 + pair as f64 * 1.0e-6;
+            let a = grid + 2 * pair;
+            particles.x[a] = base;
+            particles.y[a] = 0.95;
+            particles.x[a + 1] = base + 1.0e-12;
+            particles.y[a + 1] = 0.95;
+        }
+        let capacity = preflight_node_capacity(n)?;
+        let mut fallback_tree = QuadTree::with_capacity(capacity);
+        build_tree_with_threads_with_threshold(&mut fallback_tree, &particles, 12, 0)?;
+        assert!(!fallback_tree.nodes.is_empty());
+        // The backstop is a serial rebuild, so node numbering must match a
+        // serially built tree exactly; the parallel layout would differ.
+        let mut serial_tree = QuadTree::with_capacity(capacity);
+        build_tree(&mut serial_tree, &particles)?;
+        assert_eq!(
+            tree_fingerprint(&serial_tree),
+            tree_fingerprint(&fallback_tree),
+            "pathological cluster did not trigger the serial backstop"
+        );
+        Ok(())
+    }
+
     #[test]
     fn parallel_built_tree_forces_match_serial_tree_bitwise() -> Result<(), String> {
         fn assert_parallel_tree_force_parity(particles: &ParticleSoa) -> Result<(), String> {
@@ -1473,7 +1628,7 @@ mod tests {
             let mut serial_tree = QuadTree::with_capacity(capacity);
             let mut parallel_tree = QuadTree::with_capacity(capacity);
             build_tree(&mut serial_tree, particles)?;
-            build_tree_with_threads(&mut parallel_tree, particles, 12)?;
+            build_tree_with_threads_with_threshold(&mut parallel_tree, particles, 12, 0)?;
 
             let mut serial_ax = vec![0.0; n];
             let mut serial_ay = vec![0.0; n];
