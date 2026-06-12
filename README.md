@@ -255,13 +255,16 @@ ffmpeg -y -framerate 30 -i captured_run/frame_%06d.ppm -c:v libx264 -crf 0 -pix_
 - `--epsilon <softening>`
 - `--g <gravity constant multiplier>` (default: `1`)
 - `--integrator <leapfrog|verlet|rk2>` (default: `leapfrog`; `rk2` is explicit midpoint)
-- `--init <uniform|gaussian|plummer|disk|rotating-disk|keplerian-disk>`
+- `--init <uniform|gaussian|plummer|disk|rotating-disk|keplerian-disk|galaxy-disk>`
 - `--init-radius <radius>`
 - `--init-spread <spread>`
 - `--init-v-amp <velocity amplitude>`
 - `--init-lambda <shape parameter for plummer/disk>`
 - `--init-center-x <x center>`
 - `--init-center-y <y center>`
+- `--disk-scale-length <Rd>` (galaxy-disk only; defaults to `--init-radius / 4` when omitted or non-positive)
+- `--disk-central-mass-frac <fraction>` (galaxy-disk only; default `0.1` central point particle fraction of total mass, clamped to `[0, 0.95]`)
+- `--disk-dispersion <fraction>` (galaxy-disk only; default `0.05` Gaussian radial/tangential sigma as a fraction of local circular speed)
 - `--mass-profile <uniform|lognormal|gaussian|pow-law>`
 - `--mass-mean <mass mean>`
 - `--mass-stddev <mass standard deviation>`
@@ -289,6 +292,16 @@ ffmpeg -y -framerate 30 -i captured_run/frame_%06d.ppm -c:v libx264 -crf 0 -pix_
 - `--max-memory-mib <size>` (hard cap on estimated workspace bytes)
 - `--csv <path>` (write benchmark summary rows to a CSV file; includes all parsed timing/metric columns)
 - `--features unrolled` is a Cargo build feature (pass via `cargo run/build --features unrolled`) that enables an optional manual 4-lane unrolled direct-force path; it is not a SIMD implementation and measured 1.11x faster than scalar at N=4096 in the current direct-force bench.
+
+### Galaxy disk initial condition
+
+`--init galaxy-disk` samples an exponential surface-density disk, truncated at `--init-radius`, around `--init-center-x/--init-center-y`. It adds one central point particle carrying `--disk-central-mass-frac` of the total initialized mass, then assigns circular tangential speeds from the actual enclosed discrete mass, `v_c(r)=sqrt(G*M(<r)/r)`. `--disk-dispersion` is a simple Gaussian radial/tangential velocity multiplier relative to local `v_c`; it is not a Toomre-Q stability analysis.
+
+Repro command:
+
+```bash
+cargo run --release -- --init galaxy-disk --n 20000 --steps 240 --dt 0.00005 --g 1.0 --init-radius 1.0 --disk-scale-length 0.25 --disk-central-mass-frac 0.1 --disk-dispersion 0.05 --seed 1902 --theta 0.7 --epsilon 0.01 --threads 1 --record --frames-dir .sc/galaxy-disk-frames --every-steps 12 --view-radius 1.4
+```
 
 ## Performance profile
 

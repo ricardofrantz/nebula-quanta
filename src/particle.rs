@@ -70,6 +70,71 @@ impl ParticleSoa {
         mass_max: f64,
         mass_alpha: f64,
     ) -> Self {
+        Self::random_with_profiles_and_galaxy_disk(
+            n,
+            seed,
+            init_profile,
+            init_radius,
+            init_spread,
+            init_v_amp,
+            init_lambda,
+            init_center_x,
+            init_center_y,
+            mass_profile,
+            mass_mean,
+            mass_stddev,
+            mass_min,
+            mass_max,
+            mass_alpha,
+            0.0,
+            0.1,
+            0.05,
+            1.0,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn random_with_profiles_and_galaxy_disk(
+        n: usize,
+        seed: u64,
+        init_profile: InitProfile,
+        init_radius: f64,
+        init_spread: f64,
+        init_v_amp: f64,
+        init_lambda: f64,
+        init_center_x: f64,
+        init_center_y: f64,
+        mass_profile: MassProfile,
+        mass_mean: f64,
+        mass_stddev: f64,
+        mass_min: f64,
+        mass_max: f64,
+        mass_alpha: f64,
+        disk_scale_length: f64,
+        disk_central_mass_frac: f64,
+        disk_dispersion: f64,
+        g: f64,
+    ) -> Self {
+        if init_profile == InitProfile::GalaxyDisk {
+            return sample_galaxy_disk(
+                n,
+                seed,
+                init_radius,
+                init_center_x,
+                init_center_y,
+                mass_profile,
+                mass_mean,
+                mass_stddev,
+                mass_min,
+                mass_max,
+                mass_alpha,
+                disk_scale_length,
+                disk_central_mass_frac,
+                disk_dispersion,
+                g,
+            );
+        }
+
         let mut particles = Self::with_len(n);
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
 
@@ -415,6 +480,7 @@ fn sample_initial_position(
             let angle = rng.random_range(0.0..(2.0 * PI));
             (center_x + r * angle.cos(), center_y + r * angle.sin())
         }
+        InitProfile::GalaxyDisk => unreachable!("galaxy-disk uses a two-pass sampler"),
     }
 }
 
@@ -497,6 +563,131 @@ fn sample_initial_velocity(
                 speed * angle.cos() + jitter_y,
             )
         }
+        InitProfile::GalaxyDisk => unreachable!("galaxy-disk uses a two-pass sampler"),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn sample_galaxy_disk(
+    n: usize,
+    seed: u64,
+    init_radius: f64,
+    center_x: f64,
+    center_y: f64,
+    mass_profile: MassProfile,
+    mass_mean: f64,
+    mass_stddev: f64,
+    mass_min: f64,
+    mass_max: f64,
+    mass_alpha: f64,
+    disk_scale_length: f64,
+    disk_central_mass_frac: f64,
+    disk_dispersion: f64,
+    g: f64,
+) -> ParticleSoa {
+    let mut particles = ParticleSoa::with_len(n);
+    if n == 0 {
+        return particles;
+    }
+
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    let radius = init_radius.abs().max(1e-12);
+    let scale_length = if disk_scale_length.is_finite() && disk_scale_length > 0.0 {
+        disk_scale_length
+    } else {
+        radius / 4.0
+    };
+    let central_frac = if disk_central_mass_frac.is_finite() {
+        disk_central_mass_frac.clamp(0.0, 0.95)
+    } else {
+        0.1
+    };
+    let dispersion_frac = if disk_dispersion.is_finite() {
+        disk_dispersion.abs()
+    } else {
+        0.05
+    };
+    let gravity = if g.is_finite() { g.abs() } else { 1.0 };
+
+    particles.x[0] = center_x;
+    particles.y[0] = center_y;
+    particles.vx[0] = 0.0;
+    particles.vy[0] = 0.0;
+
+    let mut disk_mass_sum = 0.0;
+    for i in 1..n {
+        let r = sample_truncated_exponential_radius(&mut rng, scale_length, radius);
+        let angle = rng.random_range(0.0..(2.0 * PI));
+        particles.x[i] = center_x + r * angle.cos();
+        particles.y[i] = center_y + r * angle.sin();
+        let mass = sample_mass(
+            &mut rng,
+            mass_profile,
+            mass_mean,
+            mass_stddev,
+            mass_min,
+            mass_max,
+            mass_alpha,
+        );
+        particles.m[i] = mass;
+        disk_mass_sum += mass;
+    }
+
+    particles.m[0] = if n == 1 || central_frac <= 0.0 {
+        if n == 1 { mass_mean.max(1e-6) } else { 0.0 }
+    } else {
+        disk_mass_sum * central_frac / (1.0 - central_frac)
+    };
+
+    let mut by_radius: Vec<(usize, f64)> = (1..n)
+        .map(|i| {
+            let dx = particles.x[i] - center_x;
+            let dy = particles.y[i] - center_y;
+            (i, (dx * dx + dy * dy).sqrt())
+        })
+        .collect();
+    by_radius.sort_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+
+    // GalaxyDisk intentionally uses a simple two-pass circular-speed estimate:
+    // after positions and masses are fixed, v_c(r)=sqrt(G*M(<r)/r) from the
+    // actual discrete enclosed mass. The dispersion below is only a Gaussian
+    // multiplier of local v_c, not a Toomre-Q stability analysis.
+    let mut enclosed_mass = particles.m[0];
+    for (idx, r) in by_radius {
+        enclosed_mass += particles.m[idx];
+        let r = r.max(1e-12);
+        let vc = (gravity * enclosed_mass / r).sqrt();
+        let dx = particles.x[idx] - center_x;
+        let dy = particles.y[idx] - center_y;
+        let inv_r = 1.0 / r;
+        let radial_x = dx * inv_r;
+        let radial_y = dy * inv_r;
+        let tangent_x = -radial_y;
+        let tangent_y = radial_x;
+        let sigma = dispersion_frac * vc;
+        let radial_jitter = random_standard_normal(&mut rng) * sigma;
+        let tangential_jitter = random_standard_normal(&mut rng) * sigma;
+        let tangential_speed = vc + tangential_jitter;
+        particles.vx[idx] = tangent_x * tangential_speed + radial_x * radial_jitter;
+        particles.vy[idx] = tangent_y * tangential_speed + radial_y * radial_jitter;
+    }
+
+    particles
+}
+
+fn sample_truncated_exponential_radius(
+    rng: &mut ChaCha8Rng,
+    scale_length: f64,
+    truncation_radius: f64,
+) -> f64 {
+    let peak_radius = scale_length.min(truncation_radius);
+    let peak_density = (peak_radius * (-peak_radius / scale_length).exp()).max(1e-12);
+    loop {
+        let r = rng.random_range(0.0..truncation_radius);
+        let accept = (r * (-r / scale_length).exp() / peak_density).clamp(0.0, 1.0);
+        if rng.random::<f64>() <= accept {
+            return r;
+        }
     }
 }
 
@@ -506,4 +697,105 @@ fn random_standard_normal(rng: &mut ChaCha8Rng) -> f64 {
     let r = (-2.0 * u1.ln()).sqrt();
     let theta = 2.0 * PI * u2;
     r * theta.cos()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn galaxy(seed: u64) -> ParticleSoa {
+        ParticleSoa::random_with_profiles_and_galaxy_disk(
+            6000,
+            seed,
+            InitProfile::GalaxyDisk,
+            1.0,
+            1.0,
+            0.05,
+            1.0,
+            0.0,
+            0.0,
+            MassProfile::Uniform,
+            1.0,
+            0.25,
+            0.9,
+            1.1,
+            2.0,
+            0.25,
+            0.1,
+            0.05,
+            1.0,
+        )
+    }
+
+    fn expected_vc_by_index(particles: &ParticleSoa, g: f64) -> Vec<f64> {
+        let mut expected = vec![0.0; particles.len()];
+        let mut radii: Vec<(usize, f64)> = (1..particles.len())
+            .map(|i| {
+                let r = (particles.x[i] * particles.x[i] + particles.y[i] * particles.y[i]).sqrt();
+                (i, r)
+            })
+            .collect();
+        radii.sort_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+        let mut enclosed = particles.m[0];
+        for (idx, r) in radii {
+            enclosed += particles.m[idx];
+            expected[idx] = (g * enclosed / r.max(1e-12)).sqrt();
+        }
+        expected
+    }
+
+    #[test]
+    fn galaxy_disk_rotation_curve_matches_enclosed_mass_two_seeds() {
+        for seed in [1701_u64, 1902_u64] {
+            let particles = galaxy(seed);
+            let expected = expected_vc_by_index(&particles, 1.0);
+            for (bin_idx, (lo, hi)) in [(0.05, 0.25), (0.25, 0.55), (0.55, 1.0)]
+                .into_iter()
+                .enumerate()
+            {
+                let mut count = 0_usize;
+                let mut observed_sum = 0.0;
+                let mut expected_sum = 0.0;
+                for (i, expected_vc) in expected.iter().enumerate().skip(1) {
+                    let x = particles.x[i];
+                    let y = particles.y[i];
+                    let r = (x * x + y * y).sqrt();
+                    if r < lo || r >= hi {
+                        continue;
+                    }
+                    let tx = -y / r;
+                    let ty = x / r;
+                    observed_sum += particles.vx[i] * tx + particles.vy[i] * ty;
+                    expected_sum += expected_vc;
+                    count += 1;
+                }
+                assert!(
+                    count > 50,
+                    "seed {seed} bin {bin_idx} has too few samples: {count}"
+                );
+                let observed_mean = observed_sum / count as f64;
+                let expected_mean = expected_sum / count as f64;
+                let rel = ((observed_mean - expected_mean) / expected_mean).abs();
+                println!(
+                    "galaxy_disk_rotation_curve seed={} bin={} r=[{:.2},{:.2}) count={} observed_mean_vt={:.9} expected_mean_vc={:.9} rel_err={:.9}",
+                    seed, bin_idx, lo, hi, count, observed_mean, expected_mean, rel
+                );
+                assert!(
+                    rel <= 0.10,
+                    "seed {seed} bin {bin_idx} relative error {rel} > 10%"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn galaxy_disk_same_seed_is_bitwise_deterministic() {
+        let a = galaxy(4242);
+        let b = galaxy(4242);
+        assert_eq!(a.x, b.x);
+        assert_eq!(a.y, b.y);
+        assert_eq!(a.vx, b.vx);
+        assert_eq!(a.vy, b.vy);
+        assert_eq!(a.m, b.m);
+    }
 }

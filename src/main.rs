@@ -26,7 +26,7 @@ fn main() {
         return;
     }
 
-    let mut particles = ParticleSoa::random_with_profiles(
+    let mut particles = ParticleSoa::random_with_profiles_and_galaxy_disk(
         args.n,
         args.seed,
         args.init,
@@ -42,6 +42,10 @@ fn main() {
         args.mass_min,
         args.mass_max,
         args.mass_alpha,
+        args.disk_scale_length,
+        args.disk_central_mass_frac,
+        args.disk_dispersion,
+        args.g,
     );
     let initial_epsilon =
         args.epsilon_for_step(0, particles.len(), particle_bounds(&particles).ok());
@@ -164,7 +168,7 @@ fn main() {
             }
 
             println!(
-                "mode={} n={} steps={} dim={:?} theta={} theta_policy={:?} theta_density_scale={} softening_policy={:?} softening_density_scale={} epsilon={} dt={} g={} integrator={:?} threads={} init={:?} mass_profile={:?} init_radius={} init_spread={} init_v_amp={} init_lambda={} mass_mean={} mass_stddev={} mass_min={} mass_max={} mass_alpha={} build_ms={:.3} force_ms={:.3} integrate_ms={:.3} total_ms={:.3} avg_step_ms={:.3} steps_per_sec={:.3} ns_per_particle_force={:.1} peak_nodes={} node_capacity={} node_utilization={:.2}% workspace_bytes={} bytes_per_particle={:.1} particle_bytes={} node_bytes={} stack_bytes={} initial_ke={} initial_pe={} initial_te={} sampled_pairs={} final_ke={} final_pe={} final_te={} final_sampled_pairs={} energy_drift_abs={} energy_drift_rel={} validate_force_rms={} validate_force_max={} validate_energy_abs={} validate_energy_rel={} p0_x={} p0_y={} p0_mag={} lz0={} p1_x={} p1_y={} p1_mag={} lz1={} dp_x={} dp_y={} dp_mag={} dp_lz={}",
+                "mode={} n={} steps={} dim={:?} theta={} theta_policy={:?} theta_density_scale={} softening_policy={:?} softening_density_scale={} epsilon={} dt={} g={} integrator={:?} threads={} init={:?} mass_profile={:?} init_radius={} init_spread={} init_v_amp={} init_lambda={} disk_scale_length={} disk_central_mass_frac={} disk_dispersion={} mass_mean={} mass_stddev={} mass_min={} mass_max={} mass_alpha={} build_ms={:.3} force_ms={:.3} integrate_ms={:.3} total_ms={:.3} avg_step_ms={:.3} steps_per_sec={:.3} ns_per_particle_force={:.1} peak_nodes={} node_capacity={} node_utilization={:.2}% workspace_bytes={} bytes_per_particle={:.1} particle_bytes={} node_bytes={} stack_bytes={} initial_ke={} initial_pe={} initial_te={} sampled_pairs={} final_ke={} final_pe={} final_te={} final_sampled_pairs={} energy_drift_abs={} energy_drift_rel={} validate_force_rms={} validate_force_max={} validate_energy_abs={} validate_energy_rel={} p0_x={} p0_y={} p0_mag={} lz0={} p1_x={} p1_y={} p1_mag={} lz1={} dp_x={} dp_y={} dp_mag={} dp_lz={}",
                 mode_name,
                 args.n,
                 args.steps,
@@ -185,6 +189,9 @@ fn main() {
                 args.init_spread,
                 args.init_v_amp,
                 args.init_lambda,
+                args.disk_scale_length,
+                args.disk_central_mass_frac,
+                args.disk_dispersion,
                 args.mass_mean,
                 args.mass_stddev,
                 args.mass_min,

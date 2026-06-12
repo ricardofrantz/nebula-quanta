@@ -51,6 +51,15 @@ pub struct Args {
     /// Initial y center.
     #[arg(long, default_value_t = 0.0)]
     pub init_center_y: f64,
+    /// Exponential disk scale length for galaxy-disk; defaults to init-radius / 4 when <= 0.
+    #[arg(long, default_value_t = 0.0)]
+    pub disk_scale_length: f64,
+    /// Fraction of total galaxy-disk mass assigned to the central point particle (clamped to [0, 0.95]).
+    #[arg(long, default_value_t = 0.1)]
+    pub disk_central_mass_frac: f64,
+    /// Gaussian radial/tangential dispersion multiplier for galaxy-disk, as a fraction of local circular speed.
+    #[arg(long, default_value_t = 0.05)]
+    pub disk_dispersion: f64,
     /// Mass profile.
     #[arg(long, default_value = "uniform", value_enum)]
     pub mass_profile: MassProfile,
@@ -172,6 +181,8 @@ pub enum InitProfile {
     RotatingDisk,
     #[value(name = "keplerian-disk")]
     KeplerianDisk,
+    #[value(name = "galaxy-disk")]
+    GalaxyDisk,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
@@ -338,6 +349,26 @@ mod tests {
         assert!((args.init_radius - 1.5).abs() < f64::EPSILON);
         assert!((args.mass_alpha - 1.5).abs() < f64::EPSILON);
         assert!((args.g - 0.98).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn parse_galaxy_disk_options() {
+        let args = Args::parse_from([
+            "nq",
+            "--init",
+            "galaxy-disk",
+            "--disk-scale-length",
+            "0.4",
+            "--disk-central-mass-frac",
+            "0.2",
+            "--disk-dispersion",
+            "0.03",
+        ]);
+
+        assert_eq!(args.init, InitProfile::GalaxyDisk);
+        assert!((args.disk_scale_length - 0.4).abs() < f64::EPSILON);
+        assert!((args.disk_central_mass_frac - 0.2).abs() < f64::EPSILON);
+        assert!((args.disk_dispersion - 0.03).abs() < f64::EPSILON);
     }
 
     #[test]
